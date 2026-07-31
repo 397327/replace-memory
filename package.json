@@ -1,7 +1,7 @@
 {
   "name": "replace-memory",
-  "version": "0.1.3",
-  "description": "An Obsidian plugin that remembers common replacement rules and applies them all with one click.",
+  "version": "0.1.7",
+  "description": "An Obsidian plugin that remembers replacement rules, organizes them into named pages, and applies them with one click.",
   "main": "main.js",
   "type": "module",
   "scripts": {
@@ -9,7 +9,12 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
-  "keywords": ["obsidian", "replace", "find-and-replace", "text"],
+  "keywords": [
+    "obsidian",
+    "replace",
+    "find-and-replace",
+    "text"
+  ],
   "author": "zoe",
   "license": "MIT",
   "devDependencies": {

@@ -132,14 +132,51 @@
 }
 
 .replace-memory-footer {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
 }
 
-.replace-memory-footer button {
+.replace-memory-footer > button {
   min-height: 32px;
+}
+
+.replace-memory-page-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.replace-memory-page-button {
+  width: auto;
+  height: 32px;
+  min-width: 32px;
+  max-width: 132px;
+  padding: 0 9px;
+  overflow: hidden;
+  border-radius: var(--radius-s);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.replace-memory-add-page-button {
+  padding: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.replace-memory-page-button.is-active {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
 
 @media (max-width: 680px) {
@@ -190,6 +227,31 @@
   }
 
   .replace-memory-footer {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
+
+  .replace-memory-footer > button {
+    width: 100%;
+  }
+}
+
+
+.replace-memory-rename-modal {
+  width: min(420px, calc(100vw - 28px));
+}
+
+.replace-memory-rename-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.replace-memory-rename-form input[type="text"] {
+  width: 100%;
+}
+
+.replace-memory-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

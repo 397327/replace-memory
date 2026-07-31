@@ -1,9 +1,9 @@
 {
   "id": "replace-memory",
-  "name": "Replace Memory",
-  "version": "0.1.3",
+  "name": "Replace Memory (记忆替换)",
+  "version": "0.1.7",
   "minAppVersion": "1.5.0",
-  "description": "Remember common replacement rules and apply them all with one click, in your chosen order.",
+  "description": "Remember common replacement rules, organize them into named pages, and apply them all with one click.",
   "author": "zoe",
   "isDesktopOnly": false
 }

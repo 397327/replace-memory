@@ -3,6 +3,7 @@ import {
   Editor,
   EditorPosition,
   MarkdownView,
+  Menu,
   Modal,
   Notice,
   Plugin,
@@ -18,9 +19,16 @@ interface ReplacementRule {
   enabled: boolean;
 }
 
+interface ReplacementPage {
+  id: string;
+  name: string;
+  rules: ReplacementRule[];
+}
+
 interface ReplaceMemorySettings {
   version: number;
-  rules: ReplacementRule[];
+  pages: ReplacementPage[];
+  activePageId: string;
 }
 
 type Language = "zh" | "en";
@@ -50,20 +58,48 @@ type TextKey =
   | "settingsDesc"
   | "settingsButton"
   | "from"
-  | "to";
+  | "to"
+  | "addPage"
+  | "renamePage"
+  | "deletePage"
+  | "confirmDeletePage"
+  | "cannotDeleteLastPage"
+  | "pageNamePrompt"
+  | "emptyPageName"
+  | "duplicatePageName"
+  | "save"
+  | "cancel";
 
-const DEFAULT_SETTINGS: ReplaceMemorySettings = {
-  version: 1,
-  rules: [],
-};
+const SETTINGS_VERSION = 3;
+
+function makeId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function makePage(name: string, rules: ReplacementRule[] = []): ReplacementPage {
+  return {
+    id: makeId(),
+    name,
+    rules,
+  };
+}
+
+function makeDefaultSettings(): ReplaceMemorySettings {
+  const firstPage = makePage("1");
+  return {
+    version: SETTINGS_VERSION,
+    pages: [firstPage],
+    activePageId: firstPage.id,
+  };
+}
 
 const TEXT: Record<Language, Record<TextKey, string>> = {
   zh: {
-    open: "打开替换记忆",
-    runAllCommand: "按顺序执行全部已启用规则",
-    title: "替换记忆",
-    description: "规则会严格按照从上到下的顺序，对当前笔记依次执行。",
-    empty: "还没有替换规则。点击下方按钮添加第一条。",
+    open: "打开记忆替换",
+    runAllCommand: "按顺序执行当前页全部已启用规则",
+    title: "记忆替换",
+    description: "当前页规则会严格按照从上到下的顺序，对当前笔记依次执行。",
+    empty: "当前页还没有替换规则。点击下方按钮添加第一条。",
     addRule: "添加规则",
     runAll: "按顺序全部替换",
     findPlaceholder: "查找内容",
@@ -76,21 +112,31 @@ const TEXT: Record<Language, Record<TextKey, string>> = {
     delete: "删除",
     confirmDelete: "确定删除这条替换规则吗？",
     noActiveNote: "请先打开一个可编辑的 Markdown 笔记。",
-    noEnabledRules: "没有可执行的已启用规则。",
-    noValidRules: "没有可执行的规则；查找内容不能为空。",
+    noEnabledRules: "当前页没有可执行的已启用规则。",
+    noValidRules: "当前页没有可执行的规则；查找内容不能为空。",
     noMatches: "当前笔记中没有匹配内容。",
-    settingsName: "管理替换记忆",
+    settingsName: "管理记忆替换",
     settingsDesc: "添加、编辑和排序常用替换规则。",
     settingsButton: "打开",
     from: "查找",
     to: "替换为",
+    addPage: "添加页面",
+    renamePage: "重命名页面",
+    deletePage: "删除页面",
+    confirmDeletePage: "确定删除页面“{name}”及其中的全部规则吗？",
+    cannotDeleteLastPage: "至少需要保留一个页面。",
+    pageNamePrompt: "请输入页面名称",
+    emptyPageName: "页面名称不能为空。",
+    duplicatePageName: "已经存在同名页面。",
+    save: "保存",
+    cancel: "取消",
   },
   en: {
     open: "Open replacement memory",
-    runAllCommand: "Run all enabled replacement rules in order",
+    runAllCommand: "Run all enabled rules on the current page in order",
     title: "Replace Memory",
-    description: "Rules run sequentially from top to bottom on the current note.",
-    empty: "No replacement rules yet. Add your first rule below.",
+    description: "Rules on the current page run sequentially from top to bottom on the current note.",
+    empty: "No replacement rules on this page yet. Add your first rule below.",
     addRule: "Add rule",
     runAll: "Run all in order",
     findPlaceholder: "Find text",
@@ -103,20 +149,30 @@ const TEXT: Record<Language, Record<TextKey, string>> = {
     delete: "Delete",
     confirmDelete: "Delete this replacement rule?",
     noActiveNote: "Open an editable Markdown note first.",
-    noEnabledRules: "There are no enabled rules to run.",
-    noValidRules: "There are no valid rules to run; find text cannot be empty.",
+    noEnabledRules: "There are no enabled rules on the current page to run.",
+    noValidRules: "There are no valid rules on the current page; find text cannot be empty.",
     noMatches: "No matching text was found in the current note.",
     settingsName: "Manage replacement memory",
     settingsDesc: "Add, edit, and reorder reusable replacement rules.",
     settingsButton: "Open",
     from: "Find",
     to: "Replace with",
+    addPage: "Add page",
+    renamePage: "Rename page",
+    deletePage: "Delete page",
+    confirmDeletePage: "Delete page “{name}” and all rules on it?",
+    cannotDeleteLastPage: "At least one page must remain.",
+    pageNamePrompt: "Enter a page name",
+    emptyPageName: "Page name cannot be empty.",
+    duplicatePageName: "A page with this name already exists.",
+    save: "Save",
+    cancel: "Cancel",
   },
 };
 
 function makeRule(): ReplacementRule {
   return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    id: makeId(),
     find: "",
     replace: "",
     enabled: true,
@@ -138,12 +194,68 @@ function sanitizeRule(value: unknown): ReplacementRule {
   };
 }
 
+function sanitizeRuleList(value: unknown): ReplacementRule[] {
+  return Array.isArray(value) ? value.map(sanitizeRule) : [];
+}
+
+function sanitizeNamedPage(value: unknown, fallbackName: string): ReplacementPage | null {
+  if (!isRecord(value)) return null;
+
+  const name = typeof value.name === "string" && value.name.trim().length > 0
+    ? value.name.trim()
+    : fallbackName;
+  const id = typeof value.id === "string" && value.id.length > 0 ? value.id : makeId();
+  return {
+    id,
+    name,
+    rules: sanitizeRuleList(value.rules),
+  };
+}
+
 function parseSettings(value: unknown): ReplaceMemorySettings {
-  if (!isRecord(value)) return { ...DEFAULT_SETTINGS };
+  const settings = makeDefaultSettings();
+  if (!isRecord(value)) return settings;
+
+  let pages: ReplacementPage[] = [];
+
+  if (Array.isArray(value.pages) && value.pages.length > 0) {
+    const containsLegacyArrays = value.pages.some((page) => Array.isArray(page));
+
+    if (containsLegacyArrays) {
+      // Migrate v0.1.4: retain page 1 and every page through the last page
+      // that has rules or was active, while allowing fresh/empty installs to start with one page.
+      const legacyPages = value.pages.map(sanitizeRuleList);
+      const requestedIndex = typeof value.activePage === "number" ? Math.trunc(value.activePage) : 0;
+      let lastRelevantIndex = Math.max(0, requestedIndex);
+      legacyPages.forEach((rules, index) => {
+        if (rules.length > 0) lastRelevantIndex = Math.max(lastRelevantIndex, index);
+      });
+      pages = legacyPages
+        .slice(0, Math.min(lastRelevantIndex + 1, legacyPages.length))
+        .map((rules, index) => makePage(`${index + 1}`, rules));
+    } else {
+      pages = value.pages
+        .map((page, index) => sanitizeNamedPage(page, `${index + 1}`))
+        .filter((page): page is ReplacementPage => page !== null);
+    }
+  } else if (Array.isArray(value.rules)) {
+    // Migrate v0.1.3 and earlier: keep every existing rule on page 1.
+    pages = [makePage("1", value.rules.map(sanitizeRule))];
+  }
+
+  if (pages.length === 0) pages = [makePage("1")];
+
+  let activePageId = typeof value.activePageId === "string" ? value.activePageId : "";
+  if (!pages.some((page) => page.id === activePageId)) {
+    const requestedIndex = typeof value.activePage === "number" ? Math.trunc(value.activePage) : 0;
+    const safeIndex = Math.max(0, Math.min(requestedIndex, pages.length - 1));
+    activePageId = pages[safeIndex]?.id ?? pages[0]!.id;
+  }
 
   return {
-    version: 1,
-    rules: Array.isArray(value.rules) ? value.rules.map(sanitizeRule) : [],
+    version: SETTINGS_VERSION,
+    pages,
+    activePageId,
   };
 }
 
@@ -178,7 +290,7 @@ function createIconButton(icon: string, label: string): HTMLButtonElement {
 }
 
 export default class ReplaceMemoryPlugin extends Plugin {
-  settings: ReplaceMemorySettings = { ...DEFAULT_SETTINGS };
+  settings: ReplaceMemorySettings = makeDefaultSettings();
   language: Language = "en";
 
   async onload(): Promise<void> {
@@ -198,7 +310,7 @@ export default class ReplaceMemoryPlugin extends Plugin {
       name: this.t("runAllCommand"),
       editorCallback: async (editor: Editor) => {
         await this.applyRules(
-          this.settings.rules.filter((rule) => rule.enabled),
+          this.getCurrentRules().filter((rule) => rule.enabled),
           editor,
         );
       },
@@ -215,10 +327,36 @@ export default class ReplaceMemoryPlugin extends Plugin {
     return this.language === "zh" ? `第 ${index} 条` : `Rule ${index}`;
   }
 
+  pageText(name: string): string {
+    return this.language === "zh" ? `页面：${name}` : `Page: ${name}`;
+  }
+
+  formatText(key: TextKey, values: Record<string, string>): string {
+    let text = this.t(key);
+    for (const [name, value] of Object.entries(values)) {
+      text = text.replace(`{${name}}`, value);
+    }
+    return text;
+  }
+
   resultText(rules: number, matches: number): string {
     return this.language === "zh"
       ? `已执行 ${rules} 条规则，共替换 ${matches} 处。`
       : `Ran ${rules} rule(s) and replaced ${matches} occurrence(s).`;
+  }
+
+  getActivePage(): ReplacementPage {
+    const active = this.settings.pages.find((page) => page.id === this.settings.activePageId);
+    if (active) return active;
+
+    const fallback = this.settings.pages[0] ?? makePage("1");
+    if (this.settings.pages.length === 0) this.settings.pages.push(fallback);
+    this.settings.activePageId = fallback.id;
+    return fallback;
+  }
+
+  getCurrentRules(): ReplacementRule[] {
+    return this.getActivePage().rules;
   }
 
   async loadSettings(): Promise<void> {
@@ -230,45 +368,105 @@ export default class ReplaceMemoryPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  async setActivePage(pageId: string): Promise<void> {
+    if (pageId === this.settings.activePageId) return;
+    if (!this.settings.pages.some((page) => page.id === pageId)) return;
+    this.settings.activePageId = pageId;
+    await this.saveSettings();
+  }
+
+  private nextDefaultPageName(): string {
+    const names = new Set(this.settings.pages.map((page) => page.name));
+    let number = 1;
+    while (names.has(`${number}`)) number += 1;
+    return `${number}`;
+  }
+
+  async addPage(): Promise<void> {
+    const page = makePage(this.nextDefaultPageName());
+    this.settings.pages.push(page);
+    this.settings.activePageId = page.id;
+    await this.saveSettings();
+  }
+
+  async renamePage(pageId: string, requestedName: string): Promise<boolean> {
+    const page = this.settings.pages.find((entry) => entry.id === pageId);
+    if (!page) return false;
+
+    const name = requestedName.trim();
+    if (name.length === 0) {
+      new Notice(this.t("emptyPageName"));
+      return false;
+    }
+    if (this.settings.pages.some((entry) => entry.id !== pageId && entry.name === name)) {
+      new Notice(this.t("duplicatePageName"));
+      return false;
+    }
+
+    page.name = name;
+    await this.saveSettings();
+    return true;
+  }
+
+  async deletePage(pageId: string): Promise<boolean> {
+    if (this.settings.pages.length <= 1) {
+      new Notice(this.t("cannotDeleteLastPage"));
+      return false;
+    }
+
+    const pageIndex = this.settings.pages.findIndex((page) => page.id === pageId);
+    if (pageIndex === -1) return false;
+
+    this.settings.pages.splice(pageIndex, 1);
+    if (this.settings.activePageId === pageId) {
+      const nextIndex = Math.min(pageIndex, this.settings.pages.length - 1);
+      this.settings.activePageId = this.settings.pages[nextIndex]!.id;
+    }
+    await this.saveSettings();
+    return true;
+  }
+
   openManager(): void {
     new ReplaceMemoryModal(this.app, this).open();
   }
 
   async addRule(): Promise<void> {
-    this.settings.rules.push(makeRule());
+    this.getCurrentRules().push(makeRule());
     await this.saveSettings();
   }
 
   async removeRule(id: string): Promise<void> {
-    this.settings.rules = this.settings.rules.filter((rule) => rule.id !== id);
+    this.getActivePage().rules = this.getCurrentRules().filter((rule) => rule.id !== id);
     await this.saveSettings();
   }
 
   async moveRule(id: string, direction: -1 | 1): Promise<void> {
-    const index = this.settings.rules.findIndex((rule) => rule.id === id);
+    const rules = this.getCurrentRules();
+    const index = rules.findIndex((rule) => rule.id === id);
     if (index === -1) return;
 
     const target = index + direction;
-    if (target < 0 || target >= this.settings.rules.length) return;
+    if (target < 0 || target >= rules.length) return;
 
-    const [rule] = this.settings.rules.splice(index, 1);
+    const [rule] = rules.splice(index, 1);
     if (!rule) return;
-    this.settings.rules.splice(target, 0, rule);
+    rules.splice(target, 0, rule);
     await this.saveSettings();
   }
 
   async moveRuleBefore(sourceId: string | null, targetId: string): Promise<void> {
     if (!sourceId || sourceId === targetId) return;
 
-    const sourceIndex = this.settings.rules.findIndex((rule) => rule.id === sourceId);
-    const targetIndex = this.settings.rules.findIndex((rule) => rule.id === targetId);
+    const rules = this.getCurrentRules();
+    const sourceIndex = rules.findIndex((rule) => rule.id === sourceId);
+    const targetIndex = rules.findIndex((rule) => rule.id === targetId);
     if (sourceIndex === -1 || targetIndex === -1) return;
 
-    const [rule] = this.settings.rules.splice(sourceIndex, 1);
+    const [rule] = rules.splice(sourceIndex, 1);
     if (!rule) return;
 
     const adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-    this.settings.rules.splice(adjustedTarget, 0, rule);
+    rules.splice(adjustedTarget, 0, rule);
     await this.saveSettings();
   }
 
@@ -365,13 +563,14 @@ class ReplaceMemoryModal extends Modal {
     list.className = "replace-memory-list";
     contentEl.appendChild(list);
 
-    if (this.plugin.settings.rules.length === 0) {
+    const rules = this.plugin.getCurrentRules();
+    if (rules.length === 0) {
       const empty = document.createElement("div");
       empty.className = "replace-memory-empty";
       empty.textContent = this.plugin.t("empty");
       list.appendChild(empty);
     } else {
-      this.plugin.settings.rules.forEach((rule, index) => {
+      rules.forEach((rule, index) => {
         list.appendChild(this.createRuleRow(rule, index));
       });
     }
@@ -390,18 +589,82 @@ class ReplaceMemoryModal extends Modal {
         ?.focus();
     });
 
+    const pageTabs = document.createElement("div");
+    pageTabs.className = "replace-memory-page-tabs";
+    pageTabs.setAttribute("role", "tablist");
+
+    for (const page of this.plugin.settings.pages) {
+      const isActive = page.id === this.plugin.settings.activePageId;
+      const pageButton = document.createElement("button");
+      pageButton.type = "button";
+      pageButton.className = `replace-memory-page-button${isActive ? " is-active" : ""}`;
+      pageButton.textContent = page.name;
+      pageButton.title = this.plugin.pageText(page.name);
+      pageButton.setAttribute("aria-label", this.plugin.pageText(page.name));
+      pageButton.setAttribute("role", "tab");
+      pageButton.setAttribute("aria-selected", isActive ? "true" : "false");
+      pageButton.addEventListener("click", async () => {
+        await this.plugin.setActivePage(page.id);
+        this.render();
+      });
+      pageButton.addEventListener("contextmenu", (event: MouseEvent) => {
+        event.preventDefault();
+        this.showPageMenu(event, page);
+      });
+      pageTabs.appendChild(pageButton);
+    }
+
+    const addPageButton = document.createElement("button");
+    addPageButton.type = "button";
+    addPageButton.className = "replace-memory-page-button replace-memory-add-page-button";
+    addPageButton.textContent = "+";
+    addPageButton.title = this.plugin.t("addPage");
+    addPageButton.setAttribute("aria-label", this.plugin.t("addPage"));
+    addPageButton.addEventListener("click", async () => {
+      await this.plugin.addPage();
+      this.render();
+    });
+    pageTabs.appendChild(addPageButton);
+
     const runAllButton = document.createElement("button");
     runAllButton.type = "button";
     runAllButton.className = "mod-cta";
     runAllButton.textContent = this.plugin.t("runAll");
     runAllButton.addEventListener("click", async () => {
       await this.plugin.applyRules(
-        this.plugin.settings.rules.filter((rule) => rule.enabled),
+        this.plugin.getCurrentRules().filter((rule) => rule.enabled),
       );
     });
 
-    footer.append(addButton, runAllButton);
+    footer.append(addButton, pageTabs, runAllButton);
     contentEl.appendChild(footer);
+  }
+
+  private showPageMenu(event: MouseEvent, page: ReplacementPage): void {
+    const menu = new Menu();
+
+    menu.addItem((item) => {
+      item.setTitle(this.plugin.t("renamePage"));
+      item.setIcon("pencil");
+      item.onClick(() => {
+        new RenamePageModal(this.app, this.plugin, page, () => this.render()).open();
+      });
+    });
+
+    menu.addItem((item) => {
+      item.setTitle(this.plugin.t("deletePage"));
+      item.setIcon("trash-2");
+      item.setDisabled(this.plugin.settings.pages.length <= 1);
+      item.onClick(async () => {
+        if (this.plugin.settings.pages.length <= 1) {
+          new Notice(this.plugin.t("cannotDeleteLastPage"));
+          return;
+        }
+        if (await this.plugin.deletePage(page.id)) this.render();
+      });
+    });
+
+    menu.showAtMouseEvent(event);
   }
 
   private createRuleRow(rule: ReplacementRule, index: number): HTMLDivElement {
@@ -489,7 +752,7 @@ class ReplaceMemoryModal extends Modal {
     });
 
     const downButton = createIconButton("chevron-down", this.plugin.t("moveDown"));
-    downButton.disabled = index === this.plugin.settings.rules.length - 1;
+    downButton.disabled = index === this.plugin.getCurrentRules().length - 1;
     downButton.addEventListener("click", async () => {
       await this.plugin.moveRule(rule.id, 1);
       this.render();
@@ -536,6 +799,68 @@ class ReplaceMemoryModal extends Modal {
     });
 
     return row;
+  }
+}
+
+class RenamePageModal extends Modal {
+  constructor(
+    app: App,
+    private readonly plugin: ReplaceMemoryPlugin,
+    private readonly page: ReplacementPage,
+    private readonly onRenamed: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.modalEl.classList.add("replace-memory-rename-modal");
+    this.setTitle(this.plugin.t("renamePage"));
+
+    const form = document.createElement("form");
+    form.className = "replace-memory-rename-form";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = this.page.name;
+    input.placeholder = this.plugin.t("pageNamePrompt");
+    input.setAttribute("aria-label", this.plugin.t("pageNamePrompt"));
+
+    const actions = document.createElement("div");
+    actions.className = "replace-memory-rename-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.textContent = this.plugin.t("cancel");
+    cancelButton.addEventListener("click", () => this.close());
+
+    const saveButton = document.createElement("button");
+    saveButton.type = "submit";
+    saveButton.className = "mod-cta";
+    saveButton.textContent = this.plugin.t("save");
+
+    actions.append(cancelButton, saveButton);
+    form.append(input, actions);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const renamed = await this.plugin.renamePage(this.page.id, input.value);
+      if (!renamed) {
+        input.focus();
+        input.select();
+        return;
+      }
+      this.onRenamed();
+      this.close();
+    });
+
+    this.contentEl.appendChild(form);
+    window.setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  }
+
+  onClose(): void {
+    this.contentEl.replaceChildren();
   }
 }
 

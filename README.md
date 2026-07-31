@@ -1,4 +1,4 @@
-# Replace Memory
+# Replace Memory（记忆替换）
 
 **An Obsidian plugin that remembers common replacement rules and applies them all with one click.**
 
@@ -16,6 +16,10 @@
   支持拖动或上下按钮调整执行顺序。
 - Enable, disable, edit, delete, or run a single rule.  
   每条规则可启用、停用、编辑、删除或单独执行。
+- Organize different replacement needs into independently named pages.  
+  可按不同替换需求创建并命名独立页面。
+- Add pages with `+`, and right-click a page to rename or delete it.  
+  点击 `+` 新建页面，右键页面可重命名或直接删除。
 - Store all settings locally with no network requests or telemetry.  
   数据仅保存在本地，不联网、不上传笔记内容。
 
@@ -23,17 +27,19 @@
 
 1. Open a Markdown note.
 2. Click the Replace Memory icon in the left ribbon, or open the command palette and run **Open replacement memory**.
-3. Add your commonly used `Find → Replace with` rules.
-4. Reorder the rules as needed.
-5. Click **Run all in order** to apply all enabled rules to the current note.
+3. Use page `1` or click `+` to create a page for a different replacement workflow.
+4. Right-click a page to rename or delete it.
+5. Add and reorder your `Find → Replace with` rules.
+6. Click **Run all in order** to apply all enabled rules on the current page.
 
 中文界面下：
 
 1. 打开一篇 Markdown 笔记；
-2. 点击左侧栏的替换图标，或在命令面板中运行“打开替换记忆”；
-3. 添加常用的“查找 → 替换为”规则；
-4. 调整规则顺序；
-5. 点击“按顺序全部替换”，即可对当前笔记一键执行。
+2. 点击左侧栏的替换图标，或在命令面板中运行“打开记忆替换”；
+3. 使用默认页面“1”，或点击 `+` 为不同替换需求创建新页面；
+4. 右键页面可以重命名或直接删除；
+5. 添加并调整“查找 → 替换为”规则顺序；
+6. 点击“按顺序全部替换”，即可执行当前页面的全部已启用规则。
 
 ## Replacement order / 替换顺序
 
@@ -58,7 +64,7 @@ Restart or reload Obsidian, then enable **Replace Memory** under **Settings → 
 
 ## Commands / 命令
 
-- `Open replacement memory / 打开替换记忆`
+- `Open replacement memory / 打开记忆替换`
 - `Run all enabled replacement rules in order / 按顺序执行全部已启用规则`
 
 ## Privacy

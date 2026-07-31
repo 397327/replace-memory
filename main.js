@@ -1,16 +1,36 @@
-// @ts-nocheck
-const { MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, setIcon, } = require("obsidian");
-const DEFAULT_SETTINGS = {
-    version: 1,
-    rules: [],
-};
-const STRINGS = {
+/*
+THIS IS A GENERATED FILE.
+Source: src/main.ts
+*/
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const obsidian_1 = require("obsidian");
+const SETTINGS_VERSION = 3;
+function makeId() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+function makePage(name, rules = []) {
+    return {
+        id: makeId(),
+        name,
+        rules,
+    };
+}
+function makeDefaultSettings() {
+    const firstPage = makePage("1");
+    return {
+        version: SETTINGS_VERSION,
+        pages: [firstPage],
+        activePageId: firstPage.id,
+    };
+}
+const TEXT = {
     zh: {
-        open: "打开替换记忆",
-        runAllCommand: "按顺序执行全部已启用规则",
-        title: "替换记忆",
-        description: "规则会严格按照从上到下的顺序，对当前笔记依次执行。",
-        empty: "还没有替换规则。点击下方按钮添加第一条。",
+        open: "打开记忆替换",
+        runAllCommand: "按顺序执行当前页全部已启用规则",
+        title: "记忆替换",
+        description: "当前页规则会严格按照从上到下的顺序，对当前笔记依次执行。",
+        empty: "当前页还没有替换规则。点击下方按钮添加第一条。",
         addRule: "添加规则",
         runAll: "按顺序全部替换",
         findPlaceholder: "查找内容",
@@ -23,23 +43,31 @@ const STRINGS = {
         delete: "删除",
         confirmDelete: "确定删除这条替换规则吗？",
         noActiveNote: "请先打开一个可编辑的 Markdown 笔记。",
-        noEnabledRules: "没有可执行的已启用规则。",
-        noValidRules: "没有可执行的规则；查找内容不能为空。",
+        noEnabledRules: "当前页没有可执行的已启用规则。",
+        noValidRules: "当前页没有可执行的规则；查找内容不能为空。",
         noMatches: "当前笔记中没有匹配内容。",
-        result: (rules, matches) => `已执行 ${rules} 条规则，共替换 ${matches} 处。`,
-        settingsName: "管理替换记忆",
+        settingsName: "管理记忆替换",
         settingsDesc: "添加、编辑和排序常用替换规则。",
         settingsButton: "打开",
         from: "查找",
         to: "替换为",
-        sequence: (n) => `第 ${n} 条`,
+        addPage: "添加页面",
+        renamePage: "重命名页面",
+        deletePage: "删除页面",
+        confirmDeletePage: "确定删除页面“{name}”及其中的全部规则吗？",
+        cannotDeleteLastPage: "至少需要保留一个页面。",
+        pageNamePrompt: "请输入页面名称",
+        emptyPageName: "页面名称不能为空。",
+        duplicatePageName: "已经存在同名页面。",
+        save: "保存",
+        cancel: "取消",
     },
     en: {
         open: "Open replacement memory",
-        runAllCommand: "Run all enabled replacement rules in order",
+        runAllCommand: "Run all enabled rules on the current page in order",
         title: "Replace Memory",
-        description: "Rules run sequentially from top to bottom on the current note.",
-        empty: "No replacement rules yet. Add your first rule below.",
+        description: "Rules on the current page run sequentially from top to bottom on the current note.",
+        empty: "No replacement rules on this page yet. Add your first rule below.",
         addRule: "Add rule",
         runAll: "Run all in order",
         findPlaceholder: "Find text",
@@ -52,38 +80,110 @@ const STRINGS = {
         delete: "Delete",
         confirmDelete: "Delete this replacement rule?",
         noActiveNote: "Open an editable Markdown note first.",
-        noEnabledRules: "There are no enabled rules to run.",
-        noValidRules: "There are no valid rules to run; find text cannot be empty.",
+        noEnabledRules: "There are no enabled rules on the current page to run.",
+        noValidRules: "There are no valid rules on the current page; find text cannot be empty.",
         noMatches: "No matching text was found in the current note.",
-        result: (rules, matches) => `Ran ${rules} rule(s) and replaced ${matches} occurrence(s).`,
         settingsName: "Manage replacement memory",
         settingsDesc: "Add, edit, and reorder reusable replacement rules.",
         settingsButton: "Open",
         from: "Find",
         to: "Replace with",
-        sequence: (n) => `Rule ${n}`,
+        addPage: "Add page",
+        renamePage: "Rename page",
+        deletePage: "Delete page",
+        confirmDeletePage: "Delete page “{name}” and all rules on it?",
+        cannotDeleteLastPage: "At least one page must remain.",
+        pageNamePrompt: "Enter a page name",
+        emptyPageName: "Page name cannot be empty.",
+        duplicatePageName: "A page with this name already exists.",
+        save: "Save",
+        cancel: "Cancel",
     },
 };
 function makeRule() {
     return {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        id: makeId(),
         find: "",
         replace: "",
         enabled: true,
     };
 }
+function isRecord(value) {
+    return typeof value === "object" && value !== null;
+}
 function sanitizeRule(value) {
-    if (!value || typeof value !== "object")
+    if (!isRecord(value))
         return makeRule();
     return {
-        id: typeof value.id === "string" && value.id ? value.id : makeRule().id,
+        id: typeof value.id === "string" && value.id.length > 0 ? value.id : makeRule().id,
         find: typeof value.find === "string" ? value.find : "",
         replace: typeof value.replace === "string" ? value.replace : "",
         enabled: value.enabled !== false,
     };
 }
+function sanitizeRuleList(value) {
+    return Array.isArray(value) ? value.map(sanitizeRule) : [];
+}
+function sanitizeNamedPage(value, fallbackName) {
+    if (!isRecord(value))
+        return null;
+    const name = typeof value.name === "string" && value.name.trim().length > 0
+        ? value.name.trim()
+        : fallbackName;
+    const id = typeof value.id === "string" && value.id.length > 0 ? value.id : makeId();
+    return {
+        id,
+        name,
+        rules: sanitizeRuleList(value.rules),
+    };
+}
+function parseSettings(value) {
+    const settings = makeDefaultSettings();
+    if (!isRecord(value))
+        return settings;
+    let pages = [];
+    if (Array.isArray(value.pages) && value.pages.length > 0) {
+        const containsLegacyArrays = value.pages.some((page) => Array.isArray(page));
+        if (containsLegacyArrays) {
+            // Migrate v0.1.4: retain page 1 and every page through the last page
+            // that has rules or was active, while allowing fresh/empty installs to start with one page.
+            const legacyPages = value.pages.map(sanitizeRuleList);
+            const requestedIndex = typeof value.activePage === "number" ? Math.trunc(value.activePage) : 0;
+            let lastRelevantIndex = Math.max(0, requestedIndex);
+            legacyPages.forEach((rules, index) => {
+                if (rules.length > 0)
+                    lastRelevantIndex = Math.max(lastRelevantIndex, index);
+            });
+            pages = legacyPages
+                .slice(0, Math.min(lastRelevantIndex + 1, legacyPages.length))
+                .map((rules, index) => makePage(`${index + 1}`, rules));
+        }
+        else {
+            pages = value.pages
+                .map((page, index) => sanitizeNamedPage(page, `${index + 1}`))
+                .filter((page) => page !== null);
+        }
+    }
+    else if (Array.isArray(value.rules)) {
+        // Migrate v0.1.3 and earlier: keep every existing rule on page 1.
+        pages = [makePage("1", value.rules.map(sanitizeRule))];
+    }
+    if (pages.length === 0)
+        pages = [makePage("1")];
+    let activePageId = typeof value.activePageId === "string" ? value.activePageId : "";
+    if (!pages.some((page) => page.id === activePageId)) {
+        const requestedIndex = typeof value.activePage === "number" ? Math.trunc(value.activePage) : 0;
+        const safeIndex = Math.max(0, Math.min(requestedIndex, pages.length - 1));
+        activePageId = pages[safeIndex]?.id ?? pages[0].id;
+    }
+    return {
+        version: SETTINGS_VERSION,
+        pages,
+        activePageId,
+    };
+}
 function countOccurrences(text, search) {
-    if (!search)
+    if (search.length === 0)
         return 0;
     let count = 0;
     let position = 0;
@@ -106,13 +206,15 @@ function createIconButton(icon, label) {
     button.type = "button";
     button.className = "clickable-icon replace-memory-icon-button";
     button.setAttribute("aria-label", label);
-    button.setAttribute("title", label);
-    setIcon(button, icon);
+    button.title = label;
+    (0, obsidian_1.setIcon)(button, icon);
     return button;
 }
-class ReplaceMemoryPlugin extends Plugin {
+class ReplaceMemoryPlugin extends obsidian_1.Plugin {
+    settings = makeDefaultSettings();
+    language = "en";
     async onload() {
-        this.language = typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+        this.language = navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
         await this.loadSettings();
         this.addRibbonIcon("replace-all", this.t("open"), () => this.openManager());
         this.addCommand({
@@ -123,80 +225,164 @@ class ReplaceMemoryPlugin extends Plugin {
         this.addCommand({
             id: "run-enabled-replacement-rules",
             name: this.t("runAllCommand"),
-            editorCallback: async () => {
-                await this.applyRules(this.settings.rules.filter((rule) => rule.enabled));
+            editorCallback: async (editor) => {
+                await this.applyRules(this.getCurrentRules().filter((rule) => rule.enabled), editor);
             },
         });
         this.addSettingTab(new ReplaceMemorySettingTab(this.app, this));
     }
-    t(key, ...args) {
-        const value = STRINGS[this.language][key] ?? STRINGS.en[key] ?? key;
-        return typeof value === "function" ? value(...args) : value;
+    t(key) {
+        return TEXT[this.language][key];
+    }
+    sequenceText(index) {
+        return this.language === "zh" ? `第 ${index} 条` : `Rule ${index}`;
+    }
+    pageText(name) {
+        return this.language === "zh" ? `页面：${name}` : `Page: ${name}`;
+    }
+    formatText(key, values) {
+        let text = this.t(key);
+        for (const [name, value] of Object.entries(values)) {
+            text = text.replace(`{${name}}`, value);
+        }
+        return text;
+    }
+    resultText(rules, matches) {
+        return this.language === "zh"
+            ? `已执行 ${rules} 条规则，共替换 ${matches} 处。`
+            : `Ran ${rules} rule(s) and replaced ${matches} occurrence(s).`;
+    }
+    getActivePage() {
+        const active = this.settings.pages.find((page) => page.id === this.settings.activePageId);
+        if (active)
+            return active;
+        const fallback = this.settings.pages[0] ?? makePage("1");
+        if (this.settings.pages.length === 0)
+            this.settings.pages.push(fallback);
+        this.settings.activePageId = fallback.id;
+        return fallback;
+    }
+    getCurrentRules() {
+        return this.getActivePage().rules;
     }
     async loadSettings() {
         const loaded = await this.loadData();
-        const rules = Array.isArray(loaded?.rules) ? loaded.rules.map(sanitizeRule) : [];
-        this.settings = {
-            ...DEFAULT_SETTINGS,
-            ...(loaded ?? {}),
-            version: 1,
-            rules,
-        };
+        this.settings = parseSettings(loaded);
     }
     async saveSettings() {
         await this.saveData(this.settings);
+    }
+    async setActivePage(pageId) {
+        if (pageId === this.settings.activePageId)
+            return;
+        if (!this.settings.pages.some((page) => page.id === pageId))
+            return;
+        this.settings.activePageId = pageId;
+        await this.saveSettings();
+    }
+    nextDefaultPageName() {
+        const names = new Set(this.settings.pages.map((page) => page.name));
+        let number = 1;
+        while (names.has(`${number}`))
+            number += 1;
+        return `${number}`;
+    }
+    async addPage() {
+        const page = makePage(this.nextDefaultPageName());
+        this.settings.pages.push(page);
+        this.settings.activePageId = page.id;
+        await this.saveSettings();
+    }
+    async renamePage(pageId, requestedName) {
+        const page = this.settings.pages.find((entry) => entry.id === pageId);
+        if (!page)
+            return false;
+        const name = requestedName.trim();
+        if (name.length === 0) {
+            new obsidian_1.Notice(this.t("emptyPageName"));
+            return false;
+        }
+        if (this.settings.pages.some((entry) => entry.id !== pageId && entry.name === name)) {
+            new obsidian_1.Notice(this.t("duplicatePageName"));
+            return false;
+        }
+        page.name = name;
+        await this.saveSettings();
+        return true;
+    }
+    async deletePage(pageId) {
+        if (this.settings.pages.length <= 1) {
+            new obsidian_1.Notice(this.t("cannotDeleteLastPage"));
+            return false;
+        }
+        const pageIndex = this.settings.pages.findIndex((page) => page.id === pageId);
+        if (pageIndex === -1)
+            return false;
+        this.settings.pages.splice(pageIndex, 1);
+        if (this.settings.activePageId === pageId) {
+            const nextIndex = Math.min(pageIndex, this.settings.pages.length - 1);
+            this.settings.activePageId = this.settings.pages[nextIndex].id;
+        }
+        await this.saveSettings();
+        return true;
     }
     openManager() {
         new ReplaceMemoryModal(this.app, this).open();
     }
     async addRule() {
-        this.settings.rules.push(makeRule());
+        this.getCurrentRules().push(makeRule());
         await this.saveSettings();
     }
     async removeRule(id) {
-        this.settings.rules = this.settings.rules.filter((rule) => rule.id !== id);
+        this.getActivePage().rules = this.getCurrentRules().filter((rule) => rule.id !== id);
         await this.saveSettings();
     }
     async moveRule(id, direction) {
-        const index = this.settings.rules.findIndex((rule) => rule.id === id);
+        const rules = this.getCurrentRules();
+        const index = rules.findIndex((rule) => rule.id === id);
         if (index === -1)
             return;
         const target = index + direction;
-        if (target < 0 || target >= this.settings.rules.length)
+        if (target < 0 || target >= rules.length)
             return;
-        const [rule] = this.settings.rules.splice(index, 1);
-        this.settings.rules.splice(target, 0, rule);
+        const [rule] = rules.splice(index, 1);
+        if (!rule)
+            return;
+        rules.splice(target, 0, rule);
         await this.saveSettings();
     }
     async moveRuleBefore(sourceId, targetId) {
         if (!sourceId || sourceId === targetId)
             return;
-        const sourceIndex = this.settings.rules.findIndex((rule) => rule.id === sourceId);
-        const targetIndex = this.settings.rules.findIndex((rule) => rule.id === targetId);
+        const rules = this.getCurrentRules();
+        const sourceIndex = rules.findIndex((rule) => rule.id === sourceId);
+        const targetIndex = rules.findIndex((rule) => rule.id === targetId);
         if (sourceIndex === -1 || targetIndex === -1)
             return;
-        const [rule] = this.settings.rules.splice(sourceIndex, 1);
+        const [rule] = rules.splice(sourceIndex, 1);
+        if (!rule)
+            return;
         const adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-        this.settings.rules.splice(adjustedTarget, 0, rule);
+        rules.splice(adjustedTarget, 0, rule);
         await this.saveSettings();
     }
     getActiveEditor() {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(obsidian_1.MarkdownView);
         return view?.editor ?? null;
     }
-    async applyRules(rules) {
-        if (!Array.isArray(rules) || rules.length === 0) {
-            new Notice(this.t("noEnabledRules"));
+    async applyRules(rules, suppliedEditor) {
+        if (rules.length === 0) {
+            new obsidian_1.Notice(this.t("noEnabledRules"));
             return;
         }
-        const editor = this.getActiveEditor();
+        const editor = suppliedEditor ?? this.getActiveEditor();
         if (!editor) {
-            new Notice(this.t("noActiveNote"));
+            new obsidian_1.Notice(this.t("noActiveNote"));
             return;
         }
-        const validRules = rules.filter((rule) => typeof rule.find === "string" && rule.find.length > 0 && rule.find !== rule.replace);
+        const validRules = rules.filter((rule) => rule.find.length > 0 && rule.find !== rule.replace);
         if (validRules.length === 0) {
-            new Notice(this.t("noValidRules"));
+            new obsidian_1.Notice(this.t("noValidRules"));
             return;
         }
         const originalText = editor.getValue();
@@ -212,25 +398,25 @@ class ReplaceMemoryPlugin extends Plugin {
             totalMatches += matches;
         }
         if (totalMatches === 0 || nextText === originalText) {
-            new Notice(this.t("noMatches"));
+            new obsidian_1.Notice(this.t("noMatches"));
             return;
         }
         const selectionFrom = editor.getCursor("from");
         const selectionTo = editor.getCursor("to");
-        const scroll = typeof editor.getScrollInfo === "function" ? editor.getScrollInfo() : null;
+        const scroll = editor.getScrollInfo();
         editor.setValue(nextText);
         editor.setSelection(clampCursor(editor, selectionFrom), clampCursor(editor, selectionTo));
-        if (scroll && typeof editor.scrollTo === "function") {
-            editor.scrollTo(scroll.left, scroll.top);
-        }
-        new Notice(this.t("result", executedRules, totalMatches));
+        editor.scrollTo(scroll.left, scroll.top);
+        new obsidian_1.Notice(this.resultText(executedRules, totalMatches));
     }
 }
-class ReplaceMemoryModal extends Modal {
+module.exports = ReplaceMemoryPlugin;
+class ReplaceMemoryModal extends obsidian_1.Modal {
+    plugin;
+    draggedId = null;
     constructor(app, plugin) {
         super(app);
         this.plugin = plugin;
-        this.draggedId = null;
     }
     onOpen() {
         this.modalEl.classList.add("replace-memory-modal");
@@ -251,14 +437,15 @@ class ReplaceMemoryModal extends Modal {
         const list = document.createElement("div");
         list.className = "replace-memory-list";
         contentEl.appendChild(list);
-        if (this.plugin.settings.rules.length === 0) {
+        const rules = this.plugin.getCurrentRules();
+        if (rules.length === 0) {
             const empty = document.createElement("div");
             empty.className = "replace-memory-empty";
             empty.textContent = this.plugin.t("empty");
             list.appendChild(empty);
         }
         else {
-            this.plugin.settings.rules.forEach((rule, index) => {
+            rules.forEach((rule, index) => {
                 list.appendChild(this.createRuleRow(rule, index));
             });
         }
@@ -270,18 +457,77 @@ class ReplaceMemoryModal extends Modal {
         addButton.addEventListener("click", async () => {
             await this.plugin.addRule();
             this.render();
-            const lastInput = this.contentEl.querySelector(".replace-memory-row:last-child .replace-memory-find");
-            lastInput?.focus();
+            this.contentEl
+                .querySelector(".replace-memory-row:last-child .replace-memory-find")
+                ?.focus();
         });
+        const pageTabs = document.createElement("div");
+        pageTabs.className = "replace-memory-page-tabs";
+        pageTabs.setAttribute("role", "tablist");
+        for (const page of this.plugin.settings.pages) {
+            const isActive = page.id === this.plugin.settings.activePageId;
+            const pageButton = document.createElement("button");
+            pageButton.type = "button";
+            pageButton.className = `replace-memory-page-button${isActive ? " is-active" : ""}`;
+            pageButton.textContent = page.name;
+            pageButton.title = this.plugin.pageText(page.name);
+            pageButton.setAttribute("aria-label", this.plugin.pageText(page.name));
+            pageButton.setAttribute("role", "tab");
+            pageButton.setAttribute("aria-selected", isActive ? "true" : "false");
+            pageButton.addEventListener("click", async () => {
+                await this.plugin.setActivePage(page.id);
+                this.render();
+            });
+            pageButton.addEventListener("contextmenu", (event) => {
+                event.preventDefault();
+                this.showPageMenu(event, page);
+            });
+            pageTabs.appendChild(pageButton);
+        }
+        const addPageButton = document.createElement("button");
+        addPageButton.type = "button";
+        addPageButton.className = "replace-memory-page-button replace-memory-add-page-button";
+        addPageButton.textContent = "+";
+        addPageButton.title = this.plugin.t("addPage");
+        addPageButton.setAttribute("aria-label", this.plugin.t("addPage"));
+        addPageButton.addEventListener("click", async () => {
+            await this.plugin.addPage();
+            this.render();
+        });
+        pageTabs.appendChild(addPageButton);
         const runAllButton = document.createElement("button");
         runAllButton.type = "button";
         runAllButton.className = "mod-cta";
         runAllButton.textContent = this.plugin.t("runAll");
         runAllButton.addEventListener("click", async () => {
-            await this.plugin.applyRules(this.plugin.settings.rules.filter((rule) => rule.enabled));
+            await this.plugin.applyRules(this.plugin.getCurrentRules().filter((rule) => rule.enabled));
         });
-        footer.append(addButton, runAllButton);
+        footer.append(addButton, pageTabs, runAllButton);
         contentEl.appendChild(footer);
+    }
+    showPageMenu(event, page) {
+        const menu = new obsidian_1.Menu();
+        menu.addItem((item) => {
+            item.setTitle(this.plugin.t("renamePage"));
+            item.setIcon("pencil");
+            item.onClick(() => {
+                new RenamePageModal(this.app, this.plugin, page, () => this.render()).open();
+            });
+        });
+        menu.addItem((item) => {
+            item.setTitle(this.plugin.t("deletePage"));
+            item.setIcon("trash-2");
+            item.setDisabled(this.plugin.settings.pages.length <= 1);
+            item.onClick(async () => {
+                if (this.plugin.settings.pages.length <= 1) {
+                    new obsidian_1.Notice(this.plugin.t("cannotDeleteLastPage"));
+                    return;
+                }
+                if (await this.plugin.deletePage(page.id))
+                    this.render();
+            });
+        });
+        menu.showAtMouseEvent(event);
     }
     createRuleRow(rule, index) {
         const row = document.createElement("div");
@@ -300,11 +546,13 @@ class ReplaceMemoryModal extends Modal {
         dragHandle.addEventListener("dragend", () => {
             this.draggedId = null;
             row.classList.remove("is-dragging");
-            this.contentEl.querySelectorAll(".replace-memory-row.is-drop-target").forEach((element) => element.classList.remove("is-drop-target"));
+            this.contentEl
+                .querySelectorAll(".replace-memory-row.is-drop-target")
+                .forEach((element) => element.classList.remove("is-drop-target"));
         });
         const enabledLabel = document.createElement("label");
         enabledLabel.className = "replace-memory-enabled";
-        enabledLabel.setAttribute("title", this.plugin.t("enabled"));
+        enabledLabel.title = this.plugin.t("enabled");
         const enabledInput = document.createElement("input");
         enabledInput.type = "checkbox";
         enabledInput.checked = rule.enabled;
@@ -318,8 +566,8 @@ class ReplaceMemoryModal extends Modal {
         const sequence = document.createElement("span");
         sequence.className = "replace-memory-sequence";
         sequence.textContent = `${index + 1}`;
-        sequence.setAttribute("aria-label", this.plugin.t("sequence", index + 1));
-        sequence.setAttribute("title", this.plugin.t("sequence", index + 1));
+        sequence.setAttribute("aria-label", this.plugin.sequenceText(index + 1));
+        sequence.title = this.plugin.sequenceText(index + 1);
         const findInput = document.createElement("input");
         findInput.type = "text";
         findInput.className = "replace-memory-find";
@@ -357,7 +605,7 @@ class ReplaceMemoryModal extends Modal {
             this.render();
         });
         const downButton = createIconButton("chevron-down", this.plugin.t("moveDown"));
-        downButton.disabled = index === this.plugin.settings.rules.length - 1;
+        downButton.disabled = index === this.plugin.getCurrentRules().length - 1;
         downButton.addEventListener("click", async () => {
             await this.plugin.moveRule(rule.id, 1);
             this.render();
@@ -388,7 +636,7 @@ class ReplaceMemoryModal extends Modal {
         row.addEventListener("drop", async (event) => {
             event.preventDefault();
             row.classList.remove("is-drop-target");
-            const sourceId = this.draggedId || event.dataTransfer?.getData("text/plain");
+            const sourceId = this.draggedId ?? event.dataTransfer?.getData("text/plain") ?? null;
             await this.plugin.moveRuleBefore(sourceId, rule.id);
             this.draggedId = null;
             this.render();
@@ -396,14 +644,68 @@ class ReplaceMemoryModal extends Modal {
         return row;
     }
 }
-class ReplaceMemorySettingTab extends PluginSettingTab {
+class RenamePageModal extends obsidian_1.Modal {
+    plugin;
+    page;
+    onRenamed;
+    constructor(app, plugin, page, onRenamed) {
+        super(app);
+        this.plugin = plugin;
+        this.page = page;
+        this.onRenamed = onRenamed;
+    }
+    onOpen() {
+        this.modalEl.classList.add("replace-memory-rename-modal");
+        this.setTitle(this.plugin.t("renamePage"));
+        const form = document.createElement("form");
+        form.className = "replace-memory-rename-form";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = this.page.name;
+        input.placeholder = this.plugin.t("pageNamePrompt");
+        input.setAttribute("aria-label", this.plugin.t("pageNamePrompt"));
+        const actions = document.createElement("div");
+        actions.className = "replace-memory-rename-actions";
+        const cancelButton = document.createElement("button");
+        cancelButton.type = "button";
+        cancelButton.textContent = this.plugin.t("cancel");
+        cancelButton.addEventListener("click", () => this.close());
+        const saveButton = document.createElement("button");
+        saveButton.type = "submit";
+        saveButton.className = "mod-cta";
+        saveButton.textContent = this.plugin.t("save");
+        actions.append(cancelButton, saveButton);
+        form.append(input, actions);
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const renamed = await this.plugin.renamePage(this.page.id, input.value);
+            if (!renamed) {
+                input.focus();
+                input.select();
+                return;
+            }
+            this.onRenamed();
+            this.close();
+        });
+        this.contentEl.appendChild(form);
+        window.setTimeout(() => {
+            input.focus();
+            input.select();
+        }, 0);
+    }
+    onClose() {
+        this.contentEl.replaceChildren();
+    }
+}
+class ReplaceMemorySettingTab extends obsidian_1.PluginSettingTab {
+    plugin;
     constructor(app, plugin) {
         super(app, plugin);
         this.plugin = plugin;
     }
     display() {
         this.containerEl.replaceChildren();
-        new Setting(this.containerEl)
+        new obsidian_1.Setting(this.containerEl)
             .setName(this.plugin.t("settingsName"))
             .setDesc(this.plugin.t("settingsDesc"))
             .addButton((button) => {
@@ -412,4 +714,3 @@ class ReplaceMemorySettingTab extends PluginSettingTab {
         });
     }
 }
-module.exports = ReplaceMemoryPlugin;
