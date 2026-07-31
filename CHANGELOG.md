@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Restored the directory name to **Replace Memory** to comply with Obsidian Community Directory naming rules.
+- Kept the Chinese name **记忆替换** in the Chinese interface and documentation.
+
 ## 0.1.4
 
 - Added the Chinese plugin name **记忆替换** alongside **Replace Memory**.

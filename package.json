@@ -1,6 +1,6 @@
 {
   "name": "replace-memory",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "An Obsidian plugin that remembers replacement rules, organizes them into named pages, and applies them with one click.",
   "main": "main.js",
   "type": "module",
