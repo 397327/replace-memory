@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.6
+
+- Added **Quick Reference**.
+- Select one or several consecutive paragraphs and save them as pending references from the editor context menu.
+- Insert the saved content at the current cursor position as synchronized Obsidian block embeds.
+- Existing block IDs are reused; missing IDs are generated automatically.
+- Added commands and a compact panel for viewing, inserting, or clearing pending references.
+
 ## 0.1.5
 
 - Restored the directory name to **Replace Memory** to comply with Obsidian Community Directory naming rules.

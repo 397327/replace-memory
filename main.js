@@ -1,11 +1,7 @@
-/*
-THIS IS A GENERATED FILE.
-Source: src/main.ts
-*/
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const obsidian_1 = require("obsidian");
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 function makeId() {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -22,6 +18,7 @@ function makeDefaultSettings() {
         version: SETTINGS_VERSION,
         pages: [firstPage],
         activePageId: firstPage.id,
+        pendingReference: null,
     };
 }
 const TEXT = {
@@ -61,6 +58,16 @@ const TEXT = {
         duplicatePageName: "已经存在同名页面。",
         save: "保存",
         cancel: "取消",
+        quickReference: "快速引用",
+        captureReference: "记录选中内容为待引用",
+        insertReference: "插入待引用内容",
+        clearReference: "清空待引用内容",
+        noSelection: "请先在当前笔记中选中一段或连续多段文字。",
+        noPendingReference: "目前没有待引用内容。",
+        quickReferenceHelp: "选中文字后右键记录，再将光标放到目标位置插入引用。",
+        pendingReference: "待引用内容",
+        source: "来源",
+        paragraphCount: "段数",
     },
     en: {
         open: "Open replacement memory",
@@ -98,6 +105,16 @@ const TEXT = {
         duplicatePageName: "A page with this name already exists.",
         save: "Save",
         cancel: "Cancel",
+        quickReference: "Quick reference",
+        captureReference: "Save selected text for reference",
+        insertReference: "Insert pending reference",
+        clearReference: "Clear pending reference",
+        noSelection: "Select one paragraph or several consecutive paragraphs first.",
+        noPendingReference: "There is no pending reference.",
+        quickReferenceHelp: "Select text and save it from the context menu, then place the cursor and insert the reference.",
+        pendingReference: "Pending reference",
+        source: "Source",
+        paragraphCount: "Paragraphs",
     },
 };
 function makeRule() {
@@ -137,7 +154,64 @@ function sanitizeNamedPage(value, fallbackName) {
         rules: sanitizeRuleList(value.rules),
     };
 }
+function sanitizePendingReference(value) {
+    var _a;
+    if (!isRecord(value))
+        return null;
+    if (typeof value.sourcePath !== "string" || value.sourcePath.length === 0)
+        return null;
+    if (!Array.isArray(value.blocks) || value.blocks.length === 0)
+        return null;
+    const blocks = value.blocks
+        .map((block) => {
+        if (!isRecord(block))
+            return null;
+        if (typeof block.id !== "string" || !/^[A-Za-z0-9-]+$/.test(block.id))
+            return null;
+        return {
+            id: block.id,
+            preview: typeof block.preview === "string" ? block.preview : "",
+        };
+    })
+        .filter((block) => block !== null);
+    if (blocks.length === 0)
+        return null;
+    return {
+        sourcePath: value.sourcePath,
+        sourceName: typeof value.sourceName === "string" && value.sourceName.length > 0
+            ? value.sourceName
+            : (_a = value.sourcePath.replace(/\.md$/i, "").split("/").pop()) !== null && _a !== void 0 ? _a : value.sourcePath,
+        blocks,
+        createdAt: typeof value.createdAt === "number" ? value.createdAt : Date.now(),
+    };
+}
+function extractBlockId(line) {
+    var _a;
+    const match = line.match(/(?:^|\s)\^([A-Za-z0-9-]+)\s*$/);
+    return (_a = match === null || match === void 0 ? void 0 : match[1]) !== null && _a !== void 0 ? _a : null;
+}
+function createReferenceId(usedIds) {
+    let id = "";
+    do {
+        id = `rmref-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    } while (usedIds.has(id));
+    usedIds.add(id);
+    return id;
+}
+function makeBlockPreview(lines) {
+    const cleaned = [...lines];
+    const lastIndex = cleaned.length - 1;
+    if (lastIndex >= 0) {
+        cleaned[lastIndex] = cleaned[lastIndex].replace(/(?:^|\s)\^[A-Za-z0-9-]+\s*$/, "");
+    }
+    const preview = cleaned.join(" ").replace(/\s+/g, " ").trim();
+    return preview.length > 120 ? `${preview.slice(0, 117)}...` : preview;
+}
+function markdownLinkPath(path) {
+    return path.replace(/\.md$/i, "");
+}
 function parseSettings(value) {
+    var _a, _b;
     const settings = makeDefaultSettings();
     if (!isRecord(value))
         return settings;
@@ -174,12 +248,13 @@ function parseSettings(value) {
     if (!pages.some((page) => page.id === activePageId)) {
         const requestedIndex = typeof value.activePage === "number" ? Math.trunc(value.activePage) : 0;
         const safeIndex = Math.max(0, Math.min(requestedIndex, pages.length - 1));
-        activePageId = pages[safeIndex]?.id ?? pages[0].id;
+        activePageId = (_b = (_a = pages[safeIndex]) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : pages[0].id;
     }
     return {
         version: SETTINGS_VERSION,
         pages,
         activePageId,
+        pendingReference: sanitizePendingReference(value.pendingReference),
     };
 }
 function countOccurrences(text, search) {
@@ -211,8 +286,11 @@ function createIconButton(icon, label) {
     return button;
 }
 class ReplaceMemoryPlugin extends obsidian_1.Plugin {
-    settings = makeDefaultSettings();
-    language = "en";
+    constructor() {
+        super(...arguments);
+        this.settings = makeDefaultSettings();
+        this.language = "en";
+    }
     async onload() {
         this.language = navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
         await this.loadSettings();
@@ -229,6 +307,41 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
                 await this.applyRules(this.getCurrentRules().filter((rule) => rule.enabled), editor);
             },
         });
+        this.addCommand({
+            id: "open-quick-reference",
+            name: this.t("quickReference"),
+            callback: () => this.openQuickReference(),
+        });
+        this.addCommand({
+            id: "capture-selection-as-reference",
+            name: this.t("captureReference"),
+            editorCallback: async (editor, view) => {
+                await this.captureSelection(editor, view);
+            },
+        });
+        this.addCommand({
+            id: "insert-pending-reference",
+            name: this.t("insertReference"),
+            editorCallback: async (editor, view) => {
+                await this.insertPendingReference(editor, view);
+            },
+        });
+        this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
+            // Always show the quick-reference actions. In some editor modes the
+            // selection is not reliably available while the menu is being built,
+            // so checking it here can incorrectly hide the command.
+            menu.addItem((item) => {
+                item.setTitle(this.t("captureReference"));
+                item.setIcon("quote");
+                item.onClick(() => void this.captureSelection(editor, view));
+            });
+            menu.addItem((item) => {
+                item.setTitle(this.t("insertReference"));
+                item.setIcon("text-cursor-input");
+                item.setDisabled(!this.settings.pendingReference);
+                item.onClick(() => void this.insertPendingReference(editor, view));
+            });
+        }));
         this.addSettingTab(new ReplaceMemorySettingTab(this.app, this));
     }
     t(key) {
@@ -252,11 +365,22 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
             ? `已执行 ${rules} 条规则，共替换 ${matches} 处。`
             : `Ran ${rules} rule(s) and replaced ${matches} occurrence(s).`;
     }
+    referenceCapturedText(count) {
+        return this.language === "zh"
+            ? `已记录 ${count} 段待引用内容。`
+            : `Saved ${count} paragraph(s) for reference.`;
+    }
+    referenceInsertedText(count) {
+        return this.language === "zh"
+            ? `已插入 ${count} 段引用。`
+            : `Inserted ${count} reference(s).`;
+    }
     getActivePage() {
+        var _a;
         const active = this.settings.pages.find((page) => page.id === this.settings.activePageId);
         if (active)
             return active;
-        const fallback = this.settings.pages[0] ?? makePage("1");
+        const fallback = (_a = this.settings.pages[0]) !== null && _a !== void 0 ? _a : makePage("1");
         if (this.settings.pages.length === 0)
             this.settings.pages.push(fallback);
         this.settings.activePageId = fallback.id;
@@ -367,15 +491,145 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         await this.saveSettings();
     }
     getActiveEditor() {
+        var _a;
         const view = this.app.workspace.getActiveViewOfType(obsidian_1.MarkdownView);
-        return view?.editor ?? null;
+        return (_a = view === null || view === void 0 ? void 0 : view.editor) !== null && _a !== void 0 ? _a : null;
+    }
+    getActiveMarkdownView() {
+        return this.app.workspace.getActiveViewOfType(obsidian_1.MarkdownView);
+    }
+    openQuickReference() {
+        new QuickReferenceModal(this.app, this).open();
+    }
+    async clearPendingReference() {
+        this.settings.pendingReference = null;
+        await this.saveSettings();
+    }
+    async captureSelection(editor, suppliedView) {
+        if (editor.getSelection().trim().length === 0) {
+            new obsidian_1.Notice(this.t("noSelection"));
+            return false;
+        }
+        const view = suppliedView !== null && suppliedView !== void 0 ? suppliedView : this.getActiveMarkdownView();
+        const file = view === null || view === void 0 ? void 0 : view.file;
+        if (!file) {
+            new obsidian_1.Notice(this.t("noActiveNote"));
+            return false;
+        }
+        const from = editor.getCursor("from");
+        const to = editor.getCursor("to");
+        let startLine = from.line;
+        let endLine = to.line;
+        if (to.ch === 0 && endLine > startLine)
+            endLine -= 1;
+        while (startLine > 0 && editor.getLine(startLine - 1).trim().length > 0) {
+            startLine -= 1;
+        }
+        while (endLine < editor.lastLine() && editor.getLine(endLine + 1).trim().length > 0) {
+            endLine += 1;
+        }
+        const blocks = [];
+        let line = startLine;
+        while (line <= endLine) {
+            while (line <= endLine && editor.getLine(line).trim().length === 0)
+                line += 1;
+            if (line > endLine)
+                break;
+            const blockStart = line;
+            while (line <= endLine && editor.getLine(line).trim().length > 0)
+                line += 1;
+            blocks.push({ startLine: blockStart, endLine: line - 1 });
+        }
+        if (blocks.length === 0) {
+            new obsidian_1.Notice(this.t("noSelection"));
+            return false;
+        }
+        const usedIds = new Set();
+        for (const match of editor.getValue().matchAll(/\^([A-Za-z0-9-]+)/g)) {
+            if (match[1])
+                usedIds.add(match[1]);
+        }
+        const pendingBlocks = [];
+        const insertions = [];
+        for (const block of blocks) {
+            const lines = [];
+            for (let index = block.startLine; index <= block.endLine; index += 1) {
+                lines.push(editor.getLine(index));
+            }
+            const lastLine = editor.getLine(block.endLine);
+            let id = extractBlockId(lastLine);
+            if (!id) {
+                id = createReferenceId(usedIds);
+                insertions.push({
+                    line: block.endLine,
+                    ch: lastLine.length,
+                    text: ` ^${id}`,
+                });
+            }
+            pendingBlocks.push({
+                id,
+                preview: makeBlockPreview(lines),
+            });
+        }
+        insertions
+            .sort((left, right) => right.line - left.line)
+            .forEach((insertion) => {
+            editor.replaceRange(insertion.text, { line: insertion.line, ch: insertion.ch });
+        });
+        this.settings.pendingReference = {
+            sourcePath: file.path,
+            sourceName: file.basename,
+            blocks: pendingBlocks,
+            createdAt: Date.now(),
+        };
+        await this.saveSettings();
+        new obsidian_1.Notice(this.referenceCapturedText(pendingBlocks.length));
+        return true;
+    }
+    async insertPendingReference(editor, suppliedView) {
+        const pending = this.settings.pendingReference;
+        if (!pending) {
+            new obsidian_1.Notice(this.t("noPendingReference"));
+            return false;
+        }
+        const targetEditor = editor !== null && editor !== void 0 ? editor : this.getActiveEditor();
+        const view = suppliedView !== null && suppliedView !== void 0 ? suppliedView : this.getActiveMarkdownView();
+        if (!targetEditor || !(view === null || view === void 0 ? void 0 : view.file)) {
+            new obsidian_1.Notice(this.t("noActiveNote"));
+            return false;
+        }
+        const sameFile = view.file.path === pending.sourcePath;
+        const source = markdownLinkPath(pending.sourcePath);
+        const embeds = pending.blocks
+            .map((block) => sameFile
+            ? `![[#^${block.id}]]`
+            : `![[${source}#^${block.id}]]`)
+            .join("\n\n");
+        const cursor = targetEditor.getCursor();
+        const currentLine = targetEditor.getLine(cursor.line);
+        const before = currentLine.slice(0, cursor.ch);
+        const after = currentLine.slice(cursor.ch);
+        const prefix = before.trim().length > 0 ? "\n\n" : "";
+        const suffix = after.trim().length > 0 ? "\n\n" : "";
+        const insertion = `${prefix}${embeds}${suffix}`;
+        targetEditor.replaceRange(insertion, cursor);
+        const insertionLines = insertion.split("\n");
+        const endPosition = insertionLines.length === 1
+            ? { line: cursor.line, ch: cursor.ch + insertionLines[0].length }
+            : {
+                line: cursor.line + insertionLines.length - 1,
+                ch: insertionLines[insertionLines.length - 1].length,
+            };
+        targetEditor.setCursor(endPosition);
+        new obsidian_1.Notice(this.referenceInsertedText(pending.blocks.length));
+        return true;
     }
     async applyRules(rules, suppliedEditor) {
         if (rules.length === 0) {
             new obsidian_1.Notice(this.t("noEnabledRules"));
             return;
         }
-        const editor = suppliedEditor ?? this.getActiveEditor();
+        const editor = suppliedEditor !== null && suppliedEditor !== void 0 ? suppliedEditor : this.getActiveEditor();
         if (!editor) {
             new obsidian_1.Notice(this.t("noActiveNote"));
             return;
@@ -412,15 +666,23 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
 }
 module.exports = ReplaceMemoryPlugin;
 class ReplaceMemoryModal extends obsidian_1.Modal {
-    plugin;
-    draggedId = null;
     constructor(app, plugin) {
         super(app);
         this.plugin = plugin;
+        this.draggedId = null;
     }
     onOpen() {
+        var _a;
         this.modalEl.classList.add("replace-memory-modal");
         this.setTitle(this.plugin.t("title"));
+        const quickReferenceButton = document.createElement("button");
+        quickReferenceButton.type = "button";
+        quickReferenceButton.className = "replace-memory-title-action";
+        quickReferenceButton.textContent = this.plugin.t("quickReference");
+        quickReferenceButton.addEventListener("click", () => this.plugin.openQuickReference());
+        const header = this.titleEl.parentElement;
+        const closeButton = (_a = header === null || header === void 0 ? void 0 : header.querySelector(".modal-close-button")) !== null && _a !== void 0 ? _a : null;
+        header === null || header === void 0 ? void 0 : header.insertBefore(quickReferenceButton, closeButton);
         this.render();
     }
     onClose() {
@@ -455,11 +717,11 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         addButton.type = "button";
         addButton.textContent = this.plugin.t("addRule");
         addButton.addEventListener("click", async () => {
+            var _a;
             await this.plugin.addRule();
             this.render();
-            this.contentEl
-                .querySelector(".replace-memory-row:last-child .replace-memory-find")
-                ?.focus();
+            (_a = this.contentEl
+                .querySelector(".replace-memory-row:last-child .replace-memory-find")) === null || _a === void 0 ? void 0 : _a.focus();
         });
         const pageTabs = document.createElement("div");
         pageTabs.className = "replace-memory-page-tabs";
@@ -537,9 +799,10 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         dragHandle.classList.add("replace-memory-drag-handle");
         dragHandle.draggable = true;
         dragHandle.addEventListener("dragstart", (event) => {
+            var _a;
             this.draggedId = rule.id;
             row.classList.add("is-dragging");
-            event.dataTransfer?.setData("text/plain", rule.id);
+            (_a = event.dataTransfer) === null || _a === void 0 ? void 0 : _a.setData("text/plain", rule.id);
             if (event.dataTransfer)
                 event.dataTransfer.effectAllowed = "move";
         });
@@ -634,9 +897,10 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         });
         row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"));
         row.addEventListener("drop", async (event) => {
+            var _a, _b, _c;
             event.preventDefault();
             row.classList.remove("is-drop-target");
-            const sourceId = this.draggedId ?? event.dataTransfer?.getData("text/plain") ?? null;
+            const sourceId = (_c = (_a = this.draggedId) !== null && _a !== void 0 ? _a : (_b = event.dataTransfer) === null || _b === void 0 ? void 0 : _b.getData("text/plain")) !== null && _c !== void 0 ? _c : null;
             await this.plugin.moveRuleBefore(sourceId, rule.id);
             this.draggedId = null;
             this.render();
@@ -644,10 +908,85 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         return row;
     }
 }
+class QuickReferenceModal extends obsidian_1.Modal {
+    constructor(app, plugin) {
+        super(app);
+        this.plugin = plugin;
+    }
+    onOpen() {
+        this.modalEl.classList.add("replace-memory-quick-reference-modal");
+        this.setTitle(this.plugin.t("quickReference"));
+        this.render();
+    }
+    render() {
+        this.contentEl.replaceChildren();
+        const help = document.createElement("p");
+        help.className = "replace-memory-quick-reference-help";
+        help.textContent = this.plugin.t("quickReferenceHelp");
+        this.contentEl.appendChild(help);
+        const pending = this.plugin.settings.pendingReference;
+        if (!pending) {
+            const empty = document.createElement("div");
+            empty.className = "replace-memory-empty";
+            empty.textContent = this.plugin.t("noPendingReference");
+            this.contentEl.appendChild(empty);
+        }
+        else {
+            const summary = document.createElement("div");
+            summary.className = "replace-memory-reference-summary";
+            summary.textContent = `${this.plugin.t("source")}：${pending.sourceName} · ${this.plugin.t("paragraphCount")}：${pending.blocks.length}`;
+            this.contentEl.appendChild(summary);
+            const previews = document.createElement("div");
+            previews.className = "replace-memory-reference-previews";
+            pending.blocks.forEach((block, index) => {
+                const preview = document.createElement("div");
+                preview.className = "replace-memory-reference-preview";
+                preview.textContent = `${index + 1}. ${block.preview || `^${block.id}`}`;
+                previews.appendChild(preview);
+            });
+            this.contentEl.appendChild(previews);
+        }
+        const actions = document.createElement("div");
+        actions.className = "replace-memory-reference-actions";
+        const captureButton = document.createElement("button");
+        captureButton.type = "button";
+        captureButton.textContent = this.plugin.t("captureReference");
+        captureButton.addEventListener("click", async () => {
+            const editor = this.plugin.getActiveEditor();
+            const view = this.plugin.getActiveMarkdownView();
+            if (!editor || !view) {
+                new obsidian_1.Notice(this.plugin.t("noActiveNote"));
+                return;
+            }
+            if (await this.plugin.captureSelection(editor, view))
+                this.render();
+        });
+        actions.appendChild(captureButton);
+        if (pending) {
+            const clearButton = document.createElement("button");
+            clearButton.type = "button";
+            clearButton.textContent = this.plugin.t("clearReference");
+            clearButton.addEventListener("click", async () => {
+                await this.plugin.clearPendingReference();
+                this.render();
+            });
+            const insertButton = document.createElement("button");
+            insertButton.type = "button";
+            insertButton.className = "mod-cta";
+            insertButton.textContent = this.plugin.t("insertReference");
+            insertButton.addEventListener("click", async () => {
+                if (await this.plugin.insertPendingReference())
+                    this.close();
+            });
+            actions.append(clearButton, insertButton);
+        }
+        this.contentEl.appendChild(actions);
+    }
+    onClose() {
+        this.contentEl.replaceChildren();
+    }
+}
 class RenamePageModal extends obsidian_1.Modal {
-    plugin;
-    page;
-    onRenamed;
     constructor(app, plugin, page, onRenamed) {
         super(app);
         this.plugin = plugin;
@@ -698,7 +1037,6 @@ class RenamePageModal extends obsidian_1.Modal {
     }
 }
 class ReplaceMemorySettingTab extends obsidian_1.PluginSettingTab {
-    plugin;
     constructor(app, plugin) {
         super(app, plugin);
         this.plugin = plugin;

@@ -22,6 +22,8 @@
   点击 `+` 新建页面，右键页面可重命名或直接删除。
 - Store all settings locally with no network requests or telemetry.  
   数据仅保存在本地，不联网、不上传笔记内容。
+- Save one or several selected paragraphs and insert them elsewhere as synchronized Obsidian block embeds.  
+  选中一段或连续多段文字后，可记录为待引用内容，并在任意位置一键插入随原文同步更新的引用。
 
 ## Usage / 使用方法
 
@@ -31,6 +33,7 @@
 4. Right-click a page to rename or delete it.
 5. Add and reorder your `Find → Replace with` rules.
 6. Click **Run all in order** to apply all enabled rules on the current page.
+7. For quick reference, select one or several paragraphs, right-click **Save selected text for reference**, place the cursor at the target position, and right-click **Insert pending reference**.
 
 中文界面下：
 
@@ -39,7 +42,8 @@
 3. 使用默认页面“1”，或点击 `+` 为不同替换需求创建新页面；
 4. 右键页面可以重命名或直接删除；
 5. 添加并调整“查找 → 替换为”规则顺序；
-6. 点击“按顺序全部替换”，即可执行当前页面的全部已启用规则。
+6. 点击“按顺序全部替换”，即可执行当前页面的全部已启用规则；
+7. 使用快速引用时，选中一段或连续多段文字，右键“记录选中内容为待引用”，再把光标放到目标位置，右键“插入待引用内容”。
 
 ## Replacement order / 替换顺序
 
@@ -66,6 +70,9 @@ Restart or reload Obsidian, then enable **Replace Memory** under **Settings → 
 
 - `Open replacement memory / 打开记忆替换`
 - `Run all enabled replacement rules in order / 按顺序执行全部已启用规则`
+- `Quick reference / 快速引用`
+- `Save selected text for reference / 记录选中内容为待引用`
+- `Insert pending reference / 插入待引用内容`
 
 ## Privacy
 
