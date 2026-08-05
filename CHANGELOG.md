@@ -1,34 +1,37 @@
 # Changelog
 
+## 0.1.7
+
+- Added **Copy as reference / 复制为引用**.
+- Copy the current paragraph without selecting text, or copy several selected paragraphs as a group.
+- Reuse existing Obsidian block IDs and automatically generate missing IDs.
+- Added **Paste reference / 粘贴引用** to insert the latest copied reference at the current cursor position.
+- Fixed stale-reference behavior so newly copied paragraphs replace the previous internal reference cache and clipboard content.
+
 ## 0.1.6
 
-- Added **Quick Reference**.
-- Select one or several consecutive paragraphs and save them as pending references from the editor context menu.
-- Insert the saved content at the current cursor position as synchronized Obsidian block embeds.
-- Existing block IDs are reused; missing IDs are generated automatically.
-- Added commands and a compact panel for viewing, inserting, or clearing pending references.
+- Added quick reference support for selected paragraphs.
+- Added commands and context-menu entries for capturing and inserting references.
 
 ## 0.1.5
 
-- Restored the directory name to **Replace Memory** to comply with Obsidian Community Directory naming rules.
-- Kept the Chinese name **记忆替换** in the Chinese interface and documentation.
+- Added named replacement pages.
+- Start with one page and add more pages using the `+` button.
+- Right-click page tabs to rename or delete them.
+- Existing rules migrate automatically to page `1`.
 
 ## 0.1.4
 
-- Added the Chinese plugin name **记忆替换** alongside **Replace Memory**.
-- Added named replacement pages: start with page `1` and create more pages with the `+` button.
-- Each page stores an independent set of replacement rules.
-- Right-click page tabs to rename or delete them; deletion is immediate and the last page is protected.
-- Existing saved rules migrate automatically to page `1`.
+- Added independent rule pages.
+- Existing saved rules are automatically preserved on page 1.
 - The selected page is remembered between sessions.
 
 ## 0.1.3
 
-- Prepare the repository for Obsidian Community review.
-- Place all required files at the repository root.
-- Improve TypeScript type safety without changing plugin behavior.
+- Prepared the repository for Obsidian Community review.
+- Placed all required files at the repository root.
 
 ## 0.1.2
 
-- Remove the redundant list header for a cleaner compact layout.
-- Keep the compact one-line rule editor and ordered replacement workflow.
+- Removed the redundant list header for a cleaner compact layout.
+- Kept the compact one-line rule editor and ordered replacement workflow.

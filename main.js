@@ -60,10 +60,13 @@ const TEXT = {
         cancel: "取消",
         quickReference: "快速引用",
         captureReference: "记录选中内容为待引用",
-        insertReference: "插入待引用内容",
+        copyCurrentReference: "复制为引用",
+        insertReference: "粘贴引用",
         clearReference: "清空待引用内容",
         noSelection: "请先在当前笔记中选中一段或连续多段文字。",
-        noPendingReference: "目前没有待引用内容。",
+        noParagraphAtCursor: "请在需要引用的段落内右键。",
+        copyReferenceFailed: "复制引用失败，请重试。",
+        noPendingReference: "目前没有可粘贴的引用。",
         quickReferenceHelp: "选中文字后右键记录，再将光标放到目标位置插入引用。",
         pendingReference: "待引用内容",
         source: "来源",
@@ -107,10 +110,13 @@ const TEXT = {
         cancel: "Cancel",
         quickReference: "Quick reference",
         captureReference: "Save selected text for reference",
-        insertReference: "Insert pending reference",
+        copyCurrentReference: "Copy as reference",
+        insertReference: "Paste reference",
         clearReference: "Clear pending reference",
         noSelection: "Select one paragraph or several consecutive paragraphs first.",
-        noPendingReference: "There is no pending reference.",
+        noParagraphAtCursor: "Right-click inside the paragraph you want to reference.",
+        copyReferenceFailed: "Could not copy the reference. Please try again.",
+        noPendingReference: "There is no copied reference to paste.",
         quickReferenceHelp: "Select text and save it from the context menu, then place the cursor and insert the reference.",
         pendingReference: "Pending reference",
         source: "Source",
@@ -308,36 +314,28 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
             },
         });
         this.addCommand({
-            id: "open-quick-reference",
-            name: this.t("quickReference"),
-            callback: () => this.openQuickReference(),
-        });
-        this.addCommand({
-            id: "capture-selection-as-reference",
-            name: this.t("captureReference"),
+            id: "copy-as-reference",
+            name: this.t("copyCurrentReference"),
             editorCallback: async (editor, view) => {
-                await this.captureSelection(editor, view);
+                await this.copyCurrentParagraphReference(editor, view);
             },
         });
         this.addCommand({
-            id: "insert-pending-reference",
+            id: "paste-reference",
             name: this.t("insertReference"),
             editorCallback: async (editor, view) => {
                 await this.insertPendingReference(editor, view);
             },
         });
         this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
-            // Always show the quick-reference actions. In some editor modes the
-            // selection is not reliably available while the menu is being built,
-            // so checking it here can incorrectly hide the command.
             menu.addItem((item) => {
-                item.setTitle(this.t("captureReference"));
-                item.setIcon("quote");
-                item.onClick(() => void this.captureSelection(editor, view));
+                item.setTitle(this.t("copyCurrentReference"));
+                item.setIcon("copy");
+                item.onClick(() => void this.copyCurrentParagraphReference(editor, view));
             });
             menu.addItem((item) => {
                 item.setTitle(this.t("insertReference"));
-                item.setIcon("text-cursor-input");
+                item.setIcon("clipboard-paste");
                 item.setDisabled(!this.settings.pendingReference);
                 item.onClick(() => void this.insertPendingReference(editor, view));
             });
@@ -374,6 +372,11 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         return this.language === "zh"
             ? `已插入 ${count} 段引用。`
             : `Inserted ${count} reference(s).`;
+    }
+    referenceCopiedText(count) {
+        return this.language === "zh"
+            ? `已复制 ${count} 段引用片段。`
+            : `Copied ${count} reference snippet(s).`;
     }
     getActivePage() {
         var _a;
@@ -586,6 +589,137 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         new obsidian_1.Notice(this.referenceCapturedText(pendingBlocks.length));
         return true;
     }
+    async copyCurrentParagraphReference(editor, suppliedView) {
+        const view = suppliedView !== null && suppliedView !== void 0 ? suppliedView : this.getActiveMarkdownView();
+        const file = view === null || view === void 0 ? void 0 : view.file;
+        if (!file) {
+            new obsidian_1.Notice(this.t("noActiveNote"));
+            return false;
+        }
+        const selection = editor.getSelection();
+        let startLine;
+        let endLine;
+        if (selection.trim().length > 0) {
+            const from = editor.getCursor("from");
+            const to = editor.getCursor("to");
+            startLine = from.line;
+            endLine = to.line;
+            if (to.ch === 0 && endLine > startLine)
+                endLine -= 1;
+            while (startLine > 0 && editor.getLine(startLine - 1).trim().length > 0) {
+                startLine -= 1;
+            }
+            while (endLine < editor.lastLine() && editor.getLine(endLine + 1).trim().length > 0) {
+                endLine += 1;
+            }
+        }
+        else {
+            const cursor = editor.getCursor();
+            if (editor.getLine(cursor.line).trim().length === 0) {
+                new obsidian_1.Notice(this.t("noParagraphAtCursor"));
+                return false;
+            }
+            startLine = cursor.line;
+            endLine = cursor.line;
+            while (startLine > 0 && editor.getLine(startLine - 1).trim().length > 0) {
+                startLine -= 1;
+            }
+            while (endLine < editor.lastLine() && editor.getLine(endLine + 1).trim().length > 0) {
+                endLine += 1;
+            }
+        }
+        const blocks = [];
+        let line = startLine;
+        while (line <= endLine) {
+            while (line <= endLine && editor.getLine(line).trim().length === 0)
+                line += 1;
+            if (line > endLine)
+                break;
+            const blockStart = line;
+            while (line <= endLine && editor.getLine(line).trim().length > 0)
+                line += 1;
+            blocks.push({ startLine: blockStart, endLine: line - 1 });
+        }
+        if (blocks.length === 0) {
+            new obsidian_1.Notice(this.t("noParagraphAtCursor"));
+            return false;
+        }
+        const usedIds = new Set();
+        for (const match of editor.getValue().matchAll(/\^([A-Za-z0-9-]+)/g)) {
+            if (match[1])
+                usedIds.add(match[1]);
+        }
+        const copiedBlocks = [];
+        const insertions = [];
+        for (const block of blocks) {
+            const lines = [];
+            for (let index = block.startLine; index <= block.endLine; index += 1) {
+                lines.push(editor.getLine(index));
+            }
+            const lastLine = editor.getLine(block.endLine);
+            let id = extractBlockId(lastLine);
+            if (!id) {
+                id = createReferenceId(usedIds);
+                insertions.push({
+                    line: block.endLine,
+                    ch: lastLine.length,
+                    text: ` ^${id}`,
+                });
+            }
+            copiedBlocks.push({
+                id,
+                preview: makeBlockPreview(lines),
+            });
+        }
+        insertions
+            .sort((left, right) => right.line - left.line)
+            .forEach((insertion) => {
+            editor.replaceRange(insertion.text, { line: insertion.line, ch: insertion.ch });
+        });
+        this.settings.pendingReference = {
+            sourcePath: file.path,
+            sourceName: file.basename,
+            blocks: copiedBlocks,
+            createdAt: Date.now(),
+        };
+        await this.saveSettings();
+        const source = markdownLinkPath(file.path);
+        const snippet = copiedBlocks.map((block) => `![[${source}#^${block.id}]]`).join("\n\n");
+        let copiedToSystemClipboard = false;
+        try {
+            const textarea = document.createElement("textarea");
+            textarea.value = snippet;
+            textarea.setAttribute("readonly", "");
+            textarea.style.position = "fixed";
+            textarea.style.left = "-9999px";
+            textarea.style.top = "0";
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            copiedToSystemClipboard = document.execCommand("copy");
+            textarea.remove();
+        }
+        catch (_a) {
+            copiedToSystemClipboard = false;
+        }
+        if (!copiedToSystemClipboard) {
+            try {
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+                    await navigator.clipboard.writeText(snippet);
+                    copiedToSystemClipboard = true;
+                }
+            }
+            catch (_b) {
+                copiedToSystemClipboard = false;
+            }
+        }
+        if (!copiedToSystemClipboard) {
+            new obsidian_1.Notice(this.t("copyReferenceFailed"));
+            return true;
+        }
+        new obsidian_1.Notice(this.referenceCopiedText(copiedBlocks.length));
+        return true;
+    }
     async insertPendingReference(editor, suppliedView) {
         const pending = this.settings.pendingReference;
         if (!pending) {
@@ -672,17 +806,8 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         this.draggedId = null;
     }
     onOpen() {
-        var _a;
         this.modalEl.classList.add("replace-memory-modal");
         this.setTitle(this.plugin.t("title"));
-        const quickReferenceButton = document.createElement("button");
-        quickReferenceButton.type = "button";
-        quickReferenceButton.className = "replace-memory-title-action";
-        quickReferenceButton.textContent = this.plugin.t("quickReference");
-        quickReferenceButton.addEventListener("click", () => this.plugin.openQuickReference());
-        const header = this.titleEl.parentElement;
-        const closeButton = (_a = header === null || header === void 0 ? void 0 : header.querySelector(".modal-close-button")) !== null && _a !== void 0 ? _a : null;
-        header === null || header === void 0 ? void 0 : header.insertBefore(quickReferenceButton, closeButton);
         this.render();
     }
     onClose() {

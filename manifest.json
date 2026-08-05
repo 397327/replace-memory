@@ -1,7 +1,7 @@
 {
   "id": "replace-memory",
   "name": "Replace Memory",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "minAppVersion": "1.5.0",
   "description": "Remember replacement rules and quickly reference selected paragraphs with one click.",
   "author": "zoe",
