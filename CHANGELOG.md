@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8
+
+- Fixed the Obsidian directory review error by moving clipboard-helper positioning from inline styles to a CSS class.
+- No user-facing behavior changes.
+
 ## 0.1.7
 
 - Added **Copy as reference / 复制为引用**.
