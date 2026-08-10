@@ -1,74 +1,60 @@
 # Replace Memory（记忆替换）
 
-**An Obsidian plugin that remembers common replacement rules, applies them with one click, and quickly copies or pastes reusable block references.**
+**An Obsidian plugin that remembers common replacement rules, applies them with one click, reuses block references, locates their sources, and cleans unused images.**
 
-**一款能记住常用替换内容、按设定顺序一键完成多条替换，并快速复制或粘贴块引用的 Obsidian 插件。**
+**一款带记忆的一键替换 Obsidian 插件，同时支持规则分页、引用复制/粘贴与定位，以及未引用图片清理。**
 
 ## Features / 功能
 
-- Remember and reuse common plain-text replacement rules.  
-  记住并重复使用常用的纯文本替换规则。
-- Apply all enabled rules with one click, strictly from top to bottom.  
-  按照列表从上到下，一键执行全部已启用规则。
-- Organize different replacement needs into independently named pages.  
-  可按不同替换需求创建并命名独立页面。
-- Add pages with `+`, and right-click a page to rename or delete it.  
-  点击 `+` 新建页面，右键页面可重命名或直接删除。
-- Copy the current paragraph or selected paragraphs as Obsidian block references.  
-  将当前段落或选中的多段文字一键复制为 Obsidian 块引用。
-- Reuse existing block IDs, or automatically generate missing IDs.  
-  已有块编号时直接复用，没有编号时自动生成。
-- Paste the most recently copied reference at the current cursor position.  
-  在当前光标位置快速粘贴最近复制的引用。
-- Store all settings locally with no network requests or telemetry.  
-  数据仅保存在本地，不联网、不上传笔记内容。
+- **Replacement memory / 记忆替换** — Save common `Find → Replace` rules and run all enabled rules from top to bottom with one click.  
+  保存常用“查找 → 替换”规则，并按设定顺序一键执行。
+- **Named rule pages / 规则分页** — Create independent pages for different replacement needs, rename them, and delete them from the page context menu.  
+  不同替换需求可建立独立规则页，并支持自定义名称。
+- **Copy as reference / 复制为引用** — Right-click a paragraph, or select several paragraphs, to create reusable Obsidian block references. Existing block IDs are reused.  
+  当前段落或选中的多段文字可一键生成引用，已有块编号会自动复用。
+- **Paste reference / 粘贴引用** — Insert the most recently copied reference at the current cursor position, or paste with the system clipboard.  
+  在任意位置快速粘贴刚复制的引用。
+- **Locate reference source / 定位此引用** — Right-click an inserted reference to jump back to the corresponding source paragraph.  
+  右键已插入的引用即可跳回并定位原始段落。
+- **Clean unused images / 清理未引用图** — Scan the vault for high-confidence unused images, show the detected count and total size, then move them to the Obsidian trash after confirmation.  
+  扫描知识库中确定未被引用的图片，显示数量和占用空间，确认后统一移入 Obsidian 回收站。
+- **Local-only / 本地运行** — No network requests, telemetry, or note uploads.  
+  所有处理均在本地完成。
 
 ## Usage / 使用方法
 
 ### Replacement memory / 记忆替换
 
 1. Open a Markdown note.
-2. Click the Replace Memory icon in the left ribbon, or run **Open replacement memory** from the command palette.
-3. Use page `1`, or click `+` to create a page for another replacement workflow.
-4. Add and reorder `Find → Replace with` rules.
-5. Click **Run all in order** to execute the enabled rules on the current page.
+2. Click the Replace Memory ribbon icon or run **Open replacement memory**.
+3. Add `Find → Replace` rules. Use `+` to create another rule page when needed.
+4. Reorder rules and click **Run all in order**.
 
-中文界面下：
+中文：打开笔记 → 打开“记忆替换” → 添加规则 → 调整顺序 → 点击“按顺序全部替换”。
 
-1. 打开一篇 Markdown 笔记；
-2. 点击左侧栏图标，或在命令面板中运行“打开记忆替换”；
-3. 使用默认页面“1”，或点击 `+` 创建新的规则页面；
-4. 添加并调整“查找 → 替换为”规则顺序；
-5. 点击“按顺序全部替换”。
+### References / 引用
 
-### Copy and paste references / 复制与粘贴引用
+- Right-click inside a paragraph and choose **Copy as reference / 复制为引用**.
+- Or select several paragraphs first to copy several references together.
+- At the destination, choose **Paste reference / 粘贴引用** or use normal paste.
+- Right-click an inserted reference and choose **Locate reference source / 定位此引用** to jump back to the original paragraph.
 
-- Right-click inside a paragraph and choose **Copy as reference** to reference the current paragraph.
-- Select one or several paragraphs, then choose **Copy as reference** to copy them as a group.
-- Existing block IDs are reused; missing block IDs are generated automatically.
-- Move the cursor to the target position and choose **Paste reference**, or paste directly with the system clipboard.
+### Clean unused images / 清理未引用图
 
-中文界面下：
+Open Replace Memory and click **Clean unused images / 清理未引用图**. The plugin scans the vault, reports the number and total size of images it can confidently classify as unused, then asks whether to move them to the Obsidian trash. The scanner is intentionally conservative: uncertain images are kept rather than deleted.
 
-- 未选中文字时，在某个段落内右键并选择“复制为引用”，即可复制当前段落；
-- 选中一段或多段后选择“复制为引用”，可一次复制多个引用；
-- 已有块编号会直接复用，没有编号会自动生成；
-- 将光标放到目标位置，右键选择“粘贴引用”，也可以直接按 `Ctrl+V`。
+## Commands / 命令
 
-## Replacement order / 替换顺序
-
-Rules are applied to the result of the previous rule. For example:
-
-1. `Apple` → `Fruit`
-2. `Fruit` → `Food`
-
-The original text `Apple` becomes `Food`.
-
-规则会作用于上一条规则处理后的文本，因此规则顺序会影响最终结果。
+- Open replacement memory / 打开记忆替换
+- Run all enabled rules on the current page in order / 按顺序执行当前页全部已启用规则
+- Copy as reference / 复制为引用
+- Paste reference / 粘贴引用
+- Locate reference source / 定位此引用
+- Clean unused images / 清理未引用图
 
 ## Manual installation / 手动安装
 
-Download `main.js`, `manifest.json`, and `styles.css` from the latest release, then place them in:
+Download `main.js`, `manifest.json`, and `styles.css` from the latest release and place them in:
 
 ```text
 <Vault>/.obsidian/plugins/replace-memory/
@@ -76,16 +62,9 @@ Download `main.js`, `manifest.json`, and `styles.css` from the latest release, t
 
 Restart or reload Obsidian, then enable **Replace Memory** under **Settings → Community plugins**.
 
-## Commands / 命令
-
-- `Open replacement memory / 打开记忆替换`
-- `Run all enabled replacement rules in order / 按顺序执行当前页全部已启用规则`
-- `Copy as reference / 复制为引用`
-- `Paste reference / 粘贴引用`
-
 ## Privacy
 
-Replace Memory is local-only. It makes no network requests, contains no telemetry, and only modifies the currently open Markdown note when the user explicitly runs a command.
+Replace Memory is local-only. It makes no network requests and contains no telemetry.
 
 ## Development
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.9
+
+- Added **Locate reference source / 定位此引用** to jump from an inserted block reference back to its original paragraph.
+- Added **Clean unused images / 清理未引用图** with conservative reference detection and one-click move-to-trash confirmation.
+- Improved unused-image accuracy by prioritizing current editor text and actual file contents instead of stale link-cache state.
+- Kept the cleanup workflow intentionally simple: scan, show count and size, confirm, then move confirmed unused images to the Obsidian trash.
+
 ## 0.1.8
 
 - Fixed the Obsidian directory review error by moving clipboard-helper positioning from inline styles to a CSS class.

@@ -1,7 +1,7 @@
 {
   "name": "replace-memory",
-  "version": "0.1.8",
-  "description": "An Obsidian plugin that remembers replacement rules and lets you copy or paste reusable block references.",
+  "version": "0.1.9",
+  "description": "An Obsidian plugin that remembers replacement rules, reuses block references, locates reference sources, and cleans unused images.",
   "main": "main.js",
   "type": "module",
   "scripts": {

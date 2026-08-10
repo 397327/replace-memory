@@ -62,6 +62,11 @@ const TEXT = {
         captureReference: "记录选中内容为待引用",
         copyCurrentReference: "复制为引用",
         insertReference: "粘贴引用",
+        locateReference: "定位此引用",
+        noReferenceAtCursor: "请在已插入的引用上右键。",
+        referenceFileNotFound: "找不到引用来源笔记。",
+        referenceBlockNotFound: "找不到引用对应的原文，可能块编号已被删除。",
+        referenceLocated: "已定位到引用原文。",
         clearReference: "清空待引用内容",
         noSelection: "请先在当前笔记中选中一段或连续多段文字。",
         noParagraphAtCursor: "请在需要引用的段落内右键。",
@@ -71,6 +76,27 @@ const TEXT = {
         pendingReference: "待引用内容",
         source: "来源",
         paragraphCount: "段数",
+        imageCleanup: "清理未引用图",
+        imageCleanupCommand: "清理未引用图",
+        imageCleanupHelp: "仅清理能够高置信度判定为未引用的图片；扫描以当前编辑内容和文件实际内容为准。",
+        scanImages: "扫描未引用图片",
+        rescanImages: "重新扫描",
+        scanningImages: "正在扫描图片引用…",
+        noUnusedImages: "没有发现未引用图片。",
+        unusedImagesFound: "发现未引用图片",
+        selectAll: "全选",
+        selectNone: "取消全选",
+        deleteSelectedImages: "删除所选",
+        openImage: "打开图片",
+        imageCount: "张",
+        confirmDeleteImages: "移到回收站",
+        deletedImages: "已移入回收站",
+        noImagesSelected: "请先选择需要删除的图片。",
+        cleanupScanFailed: "扫描失败，请重试。",
+        cleanupDeleteFailed: "部分图片删除失败，请检查后重试。",
+        cleanupReady: "扫描完成",
+        cleanupSafeNote: "以下图片已通过多重引用检查；点击后将全部移入 Obsidian 回收站。",
+        close: "关闭",
     },
     en: {
         open: "Open replacement memory",
@@ -112,6 +138,11 @@ const TEXT = {
         captureReference: "Save selected text for reference",
         copyCurrentReference: "Copy as reference",
         insertReference: "Paste reference",
+        locateReference: "Locate reference source",
+        noReferenceAtCursor: "Right-click an inserted block reference first.",
+        referenceFileNotFound: "The source note for this reference could not be found.",
+        referenceBlockNotFound: "The referenced block could not be found. Its block ID may have been removed.",
+        referenceLocated: "Located the referenced source block.",
         clearReference: "Clear pending reference",
         noSelection: "Select one paragraph or several consecutive paragraphs first.",
         noParagraphAtCursor: "Right-click inside the paragraph you want to reference.",
@@ -121,6 +152,27 @@ const TEXT = {
         pendingReference: "Pending reference",
         source: "Source",
         paragraphCount: "Paragraphs",
+        imageCleanup: "Clean unused images",
+        imageCleanupCommand: "Clean unused images",
+        imageCleanupHelp: "Only high-confidence unused images are included. The scan uses current editor content and actual file content.",
+        scanImages: "Scan unused images",
+        rescanImages: "Scan again",
+        scanningImages: "Scanning image references…",
+        noUnusedImages: "No unused images found.",
+        unusedImagesFound: "Unused images found",
+        selectAll: "Select all",
+        selectNone: "Select none",
+        deleteSelectedImages: "Delete selected",
+        openImage: "Open image",
+        imageCount: "image(s)",
+        confirmDeleteImages: "Move to trash",
+        deletedImages: "Moved to trash",
+        noImagesSelected: "Select at least one image to delete.",
+        cleanupScanFailed: "Scan failed. Please try again.",
+        cleanupDeleteFailed: "Some images could not be deleted. Please review and try again.",
+        cleanupReady: "Scan complete",
+        cleanupSafeNote: "These images passed multiple reference checks. Continuing moves all of them to the Obsidian trash.",
+        close: "Close",
     },
 };
 function makeRule() {
@@ -216,6 +268,39 @@ function makeBlockPreview(lines) {
 function markdownLinkPath(path) {
     return path.replace(/\.md$/i, "");
 }
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"]);
+function isImageFile(file) {
+    return !!file && typeof file.extension === "string" && IMAGE_EXTENSIONS.has(file.extension.toLowerCase());
+}
+function formatBytes(size) {
+    if (!Number.isFinite(size) || size <= 0)
+        return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = size;
+    let index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+        value /= 1024;
+        index += 1;
+    }
+    const digits = index === 0 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)} ${units[index]}`;
+}
+function cleanLinkTarget(value) {
+    let target = String(value !== null && value !== void 0 ? value : "").trim();
+    if (target.startsWith("<") && target.endsWith(">"))
+        target = target.slice(1, -1);
+    target = target.replace(/^['"]|['"]$/g, "");
+    target = target.split("#")[0].split("?")[0].trim();
+    try {
+        target = decodeURIComponent(target);
+    }
+    catch (_a) {
+    }
+    return target;
+}
 function parseSettings(value) {
     var _a, _b;
     const settings = makeDefaultSettings();
@@ -296,6 +381,7 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         super(...arguments);
         this.settings = makeDefaultSettings();
         this.language = "en";
+        this.contextReferenceTarget = null;
     }
     async onload() {
         this.language = navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -327,7 +413,19 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
                 await this.insertPendingReference(editor, view);
             },
         });
+        this.addCommand({
+            id: "locate-reference-source",
+            name: this.t("locateReference"),
+            editorCallback: async (editor, view) => {
+                await this.locateReferenceSource(editor, view);
+            },
+        });
+        this.registerDomEvent(document, "contextmenu", (event) => {
+            this.contextReferenceTarget = this.referenceTargetFromDom(event.target);
+        });
         this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
+            const contextReference = this.contextReferenceTarget || this.referenceTargetAtCursor(editor);
+            this.contextReferenceTarget = null;
             menu.addItem((item) => {
                 item.setTitle(this.t("copyCurrentReference"));
                 item.setIcon("copy");
@@ -339,7 +437,18 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
                 item.setDisabled(!this.settings.pendingReference);
                 item.onClick(() => void this.insertPendingReference(editor, view));
             });
+            menu.addItem((item) => {
+                item.setTitle(this.t("locateReference"));
+                item.setIcon("link");
+                item.setDisabled(!contextReference);
+                item.onClick(() => void this.locateReferenceSource(editor, view, contextReference));
+            });
         }));
+        this.addCommand({
+            id: "open-unused-image-cleanup",
+            name: this.t("imageCleanupCommand"),
+            callback: () => this.openImageCleanup(),
+        });
         this.addSettingTab(new ReplaceMemorySettingTab(this.app, this));
     }
     t(key) {
@@ -589,6 +698,134 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         new obsidian_1.Notice(this.referenceCapturedText(pendingBlocks.length));
         return true;
     }
+    parseReferenceTarget(rawValue) {
+        if (typeof rawValue !== "string")
+            return null;
+        let value = rawValue.trim();
+        if (value.startsWith("![["))
+            value = value.slice(3);
+        else if (value.startsWith("[["))
+            value = value.slice(2);
+        if (value.endsWith("]]"))
+            value = value.slice(0, -2);
+        const aliasIndex = value.indexOf("|");
+        if (aliasIndex !== -1)
+            value = value.slice(0, aliasIndex);
+        try {
+            value = decodeURIComponent(value);
+        }
+        catch (_a) {
+            // Keep the original value when it is not URI encoded.
+        }
+        const markerIndex = value.lastIndexOf("#^");
+        if (markerIndex === -1)
+            return null;
+        const sourcePath = value.slice(0, markerIndex).trim();
+        const blockId = value.slice(markerIndex + 2).trim();
+        if (!/^[A-Za-z0-9-]+$/.test(blockId))
+            return null;
+        return { sourcePath, blockId };
+    }
+    referenceTargetAtCursor(editor) {
+        const cursor = editor.getCursor();
+        const line = editor.getLine(cursor.line);
+        const candidates = [];
+        const pattern = /!?\[\[[^\]]*#\^[A-Za-z0-9-]+(?:\|[^\]]*)?\]\]/g;
+        for (const match of line.matchAll(pattern)) {
+            if (typeof match.index !== "number")
+                continue;
+            const target = this.parseReferenceTarget(match[0]);
+            if (!target)
+                continue;
+            candidates.push({
+                start: match.index,
+                end: match.index + match[0].length,
+                target,
+            });
+        }
+        const direct = candidates.find((candidate) => cursor.ch >= candidate.start && cursor.ch <= candidate.end);
+        if (direct)
+            return direct.target;
+        return candidates.length === 1 ? candidates[0].target : null;
+    }
+    referenceTargetFromDom(target) {
+        if (!(target instanceof Element))
+            return null;
+        const element = target.closest(".internal-embed, [data-href*='#^'], a.internal-link");
+        if (!element)
+            return null;
+        const values = [
+            element.getAttribute("src"),
+            element.getAttribute("data-href"),
+            element.getAttribute("href"),
+        ];
+        const nested = element.querySelector("[src*='#^'], [data-href*='#^'], [href*='#^']");
+        if (nested) {
+            values.push(nested.getAttribute("src"), nested.getAttribute("data-href"), nested.getAttribute("href"));
+        }
+        for (const value of values) {
+            const parsed = this.parseReferenceTarget(value);
+            if (parsed)
+                return parsed;
+        }
+        return null;
+    }
+    async locateReferenceSource(editor, suppliedView, suppliedTarget) {
+        const view = suppliedView !== null && suppliedView !== void 0 ? suppliedView : this.getActiveMarkdownView();
+        const currentFile = view === null || view === void 0 ? void 0 : view.file;
+        if (!currentFile) {
+            new obsidian_1.Notice(this.t("noActiveNote"));
+            return false;
+        }
+        const target = suppliedTarget !== null && suppliedTarget !== void 0 ? suppliedTarget : this.referenceTargetAtCursor(editor);
+        if (!target) {
+            new obsidian_1.Notice(this.t("noReferenceAtCursor"));
+            return false;
+        }
+        let sourceFile = currentFile;
+        if (target.sourcePath.length > 0) {
+            sourceFile = this.app.metadataCache.getFirstLinkpathDest(target.sourcePath, currentFile.path);
+            if (!sourceFile) {
+                new obsidian_1.Notice(this.t("referenceFileNotFound"));
+                return false;
+            }
+        }
+        const content = await this.app.vault.cachedRead(sourceFile);
+        const lines = content.split(/\r?\n/);
+        const blockPattern = new RegExp(`(?:^|\\s)\\^${escapeRegExp(target.blockId)}\\s*$`);
+        const blockLine = lines.findIndex((line) => blockPattern.test(line));
+        if (blockLine === -1) {
+            new obsidian_1.Notice(this.t("referenceBlockNotFound"));
+            return false;
+        }
+        let startLine = blockLine;
+        while (startLine > 0 && lines[startLine - 1].trim().length > 0) {
+            startLine -= 1;
+        }
+        let targetView = this.getActiveMarkdownView();
+        if (!(targetView === null || targetView === void 0 ? void 0 : targetView.file) || targetView.file.path !== sourceFile.path) {
+            const leaf = this.app.workspace.getLeaf(false);
+            await leaf.openFile(sourceFile);
+            targetView = leaf.view instanceof obsidian_1.MarkdownView
+                ? leaf.view
+                : this.getActiveMarkdownView();
+        }
+        const targetEditor = targetView === null || targetView === void 0 ? void 0 : targetView.editor;
+        if (!targetEditor) {
+            new obsidian_1.Notice(this.t("noActiveNote"));
+            return false;
+        }
+        const endCh = targetEditor.getLine(blockLine).length;
+        const from = { line: startLine, ch: 0 };
+        const to = { line: blockLine, ch: endCh };
+        targetEditor.setSelection(from, to);
+        targetEditor.focus();
+        if (typeof targetEditor.scrollIntoView === "function") {
+            targetEditor.scrollIntoView({ from, to }, true);
+        }
+        new obsidian_1.Notice(this.t("referenceLocated"));
+        return true;
+    }
     async copyCurrentParagraphReference(editor, suppliedView) {
         const view = suppliedView !== null && suppliedView !== void 0 ? suppliedView : this.getActiveMarkdownView();
         const file = view === null || view === void 0 ? void 0 : view.file;
@@ -756,6 +993,179 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         new obsidian_1.Notice(this.referenceInsertedText(pending.blocks.length));
         return true;
     }
+    openImageCleanup() {
+        new UnusedImageCleanupModal(this.app, this).open();
+    }
+    resolveReferencedImage(rawLink, sourcePath, referencedPaths, imageIndex) {
+        const targetText = cleanLinkTarget(rawLink);
+        if (!targetText || /^(?:https?:|data:|obsidian:|app:|mailto:|tel:)/i.test(targetText))
+            return;
+        const normalizedTarget = targetText.replace(/\\/g, "/").replace(/^\.\//, "");
+        const directCandidates = [normalizedTarget, normalizedTarget.replace(/^\/+/, "")];
+        for (const candidate of directCandidates) {
+            const direct = this.app.vault.getAbstractFileByPath(candidate);
+            if (direct && isImageFile(direct)) {
+                referencedPaths.add(direct.path);
+                return;
+            }
+        }
+        const resolved = this.app.metadataCache.getFirstLinkpathDest(normalizedTarget, sourcePath);
+        if (resolved && isImageFile(resolved)) {
+            referencedPaths.add(resolved.path);
+            return;
+        }
+        // Conservative fallback: an unresolved image-looking link protects every matching
+        // filename/basename. It may leave a few orphans behind, but prevents false deletion.
+        const finalPart = normalizedTarget.split("/").pop() || normalizedTarget;
+        const lowerName = finalPart.toLowerCase();
+        const lowerBase = lowerName.replace(/\.[^.]+$/, "");
+        const protect = (items) => {
+            if (!items)
+                return;
+            for (const item of items)
+                referencedPaths.add(item.path);
+        };
+        protect(imageIndex.byName.get(lowerName));
+        protect(imageIndex.byBasename.get(lowerBase));
+    }
+    collectReferencesFromText(text, sourcePath, referencedPaths, imageIndex) {
+        const resolve = (value) => this.resolveReferencedImage(value, sourcePath, referencedPaths, imageIndex);
+        for (const match of text.matchAll(/!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)) {
+            if (match[1])
+                resolve(match[1]);
+        }
+        // Markdown links/embeds. Capture the full destination so paths containing spaces work.
+        for (const match of text.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
+            let destination = String(match[1] || "").trim();
+            if (destination.startsWith("<")) {
+                const close = destination.indexOf(">");
+                if (close > 0)
+                    destination = destination.slice(1, close);
+            }
+            else {
+                destination = destination.replace(/\s+(?:"[^"]*"|'[^']*')\s*$/, "").trim();
+            }
+            if (destination)
+                resolve(destination);
+        }
+        for (const match of text.matchAll(/<(?:img|source)\b[^>]*\b(?:src|srcset)\s*=\s*["']([^"']+)["'][^>]*>/gi)) {
+            if (!match[1])
+                continue;
+            const values = match[1].split(",").map((part) => part.trim().split(/\s+/)[0]).filter(Boolean);
+            for (const value of values)
+                resolve(value);
+        }
+        for (const match of text.matchAll(/<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi)) {
+            if (match[1])
+                resolve(match[1]);
+        }
+        for (const match of text.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)) {
+            if (match[1])
+                resolve(match[1]);
+        }
+        // JSON/Canvas/Base/Excalidraw and plugin metadata often store file paths as strings.
+        for (const match of text.matchAll(/["']([^"'\r\n]+\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:#[^"']*)?)["']/gi)) {
+            if (match[1])
+                resolve(match[1]);
+        }
+        // Common YAML/frontmatter forms, including scalar values and list items.
+        for (const line of text.split(/\r?\n/)) {
+            const match = line.match(/^\s*(?:[A-Za-z0-9_.-]+\s*:\s*|-\s+)(.+\.(?:png|jpe?g|gif|webp|svg|bmp|avif))(?:\s+#.*)?\s*$/i);
+            if (match && match[1])
+                resolve(match[1].trim().replace(/^['"]|['"]$/g, ""));
+        }
+    }
+    collectImageStringsFromValue(value, sourcePath, referencedPaths, imageIndex, depth = 0) {
+        if (depth > 8 || value === null || value === undefined)
+            return;
+        if (typeof value === "string") {
+            if (/\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[#?].*)?$/i.test(value.trim()))
+                this.resolveReferencedImage(value, sourcePath, referencedPaths, imageIndex);
+            return;
+        }
+        if (Array.isArray(value)) {
+            for (const item of value)
+                this.collectImageStringsFromValue(item, sourcePath, referencedPaths, imageIndex, depth + 1);
+            return;
+        }
+        if (typeof value === "object") {
+            for (const item of Object.values(value))
+                this.collectImageStringsFromValue(item, sourcePath, referencedPaths, imageIndex, depth + 1);
+        }
+    }
+    async findUnusedImages() {
+        const files = this.app.vault.getFiles();
+        const images = files.filter((file) => isImageFile(file));
+        const referencedPaths = new Set();
+        const imageIndex = { byName: new Map(), byBasename: new Map() };
+        const addIndex = (map, key, file) => {
+            const normalized = String(key || "").toLowerCase();
+            if (!normalized)
+                return;
+            const items = map.get(normalized) || [];
+            items.push(file);
+            map.set(normalized, items);
+        };
+        for (const image of images) {
+            addIndex(imageIndex.byName, image.name, image);
+            addIndex(imageIndex.byBasename, image.basename, image);
+        }
+        // Read the live editor buffers first. This avoids stale metadata immediately after
+        // a user adds or removes an image reference in an open Markdown note.
+        const liveMarkdownText = new Map();
+        try {
+            const leaves = this.app.workspace.getLeavesOfType("markdown");
+            for (const leaf of leaves) {
+                const view = leaf && leaf.view;
+                if (view && view.file && view.editor && typeof view.editor.getValue === "function")
+                    liveMarkdownText.set(view.file.path, view.editor.getValue());
+            }
+        }
+        catch (_a) {
+        }
+        // Scan actual source content instead of treating metadataCache.resolvedLinks as proof
+        // of a current reference. resolvedLinks can lag briefly after a reference is deleted.
+        // metadataCache.getFirstLinkpathDest is still used inside resolveReferencedImage only
+        // to resolve the path found in the current source text.
+        const TEXT_EXTENSIONS = new Set([
+            "md", "canvas", "base", "json", "excalidraw", "html", "htm", "css", "txt",
+            "yaml", "yml", "xml", "js", "mjs", "cjs", "ts", "tsx", "jsx"
+        ]);
+        const textFiles = files.filter((file) => TEXT_EXTENSIONS.has(file.extension.toLowerCase()));
+        for (const file of textFiles) {
+            try {
+                const text = file.extension.toLowerCase() === "md" && liveMarkdownText.has(file.path)
+                    ? liveMarkdownText.get(file.path)
+                    : await this.app.vault.read(file);
+                this.collectReferencesFromText(String(text || ""), file.path, referencedPaths, imageIndex);
+            }
+            catch (_b) {
+                // If a text-like file cannot be inspected, fail closed. We cannot prove that
+                // images are unused while a potential reference source is unreadable.
+                throw new Error(`Unable to inspect reference source: ${file.path}`);
+            }
+        }
+        return images
+            .filter((file) => !referencedPaths.has(file.path))
+            .sort((left, right) => left.path.localeCompare(right.path, undefined, { numeric: true, sensitivity: "base" }));
+    }
+    async trashImages(paths) {
+        let deleted = 0;
+        let failed = 0;
+        for (const path of paths) {
+            const file = this.app.vault.getAbstractFileByPath(path);
+            if (!file || !isImageFile(file))
+                continue;
+            try {
+                await this.app.vault.trash(file, false);
+                deleted += 1;
+            }
+            catch (_a) {
+                failed += 1;
+            }
+        }
+        return { deleted, failed };
+    }
     async applyRules(rules, suppliedEditor) {
         if (rules.length === 0) {
             new obsidian_1.Notice(this.t("noEnabledRules"));
@@ -806,6 +1216,13 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
     onOpen() {
         this.modalEl.classList.add("replace-memory-modal");
         this.setTitle(this.plugin.t("title"));
+        this.titleEl.classList.add("replace-memory-titlebar");
+        const imageCleanupButton = document.createElement("button");
+        imageCleanupButton.type = "button";
+        imageCleanupButton.className = "replace-memory-title-action";
+        imageCleanupButton.textContent = this.plugin.t("imageCleanup");
+        imageCleanupButton.addEventListener("click", () => this.plugin.openImageCleanup());
+        this.titleEl.appendChild(imageCleanupButton);
         this.render();
     }
     onClose() {
@@ -1029,6 +1446,101 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
             this.render();
         });
         return row;
+    }
+}
+class UnusedImageCleanupModal extends obsidian_1.Modal {
+    constructor(app, plugin) {
+        super(app);
+        this.plugin = plugin;
+        this.items = [];
+        this.scanning = false;
+    }
+    onOpen() {
+        this.modalEl.classList.add("replace-memory-image-cleanup-modal");
+        this.setTitle(this.plugin.t("imageCleanup"));
+        void this.scan();
+    }
+    async scan() {
+        this.scanning = true;
+        this.render();
+        try {
+            this.items = await this.plugin.findUnusedImages();
+        }
+        catch (_a) {
+            this.items = [];
+            new obsidian_1.Notice(this.plugin.t("cleanupScanFailed"));
+        }
+        finally {
+            this.scanning = false;
+            this.render();
+        }
+    }
+    totalSize() {
+        return this.items.reduce((sum, file) => sum + Number(file.stat && file.stat.size || 0), 0);
+    }
+    render() {
+        this.contentEl.replaceChildren();
+        if (this.scanning) {
+            const scanning = document.createElement("div");
+            scanning.className = "replace-memory-cleanup-state";
+            scanning.textContent = this.plugin.t("scanningImages");
+            this.contentEl.appendChild(scanning);
+            return;
+        }
+        if (this.items.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "replace-memory-cleanup-state";
+            empty.textContent = this.plugin.t("noUnusedImages");
+            const actions = document.createElement("div");
+            actions.className = "replace-memory-cleanup-actions";
+            const closeButton = document.createElement("button");
+            closeButton.type = "button";
+            closeButton.textContent = this.plugin.t("close");
+            closeButton.addEventListener("click", () => this.close());
+            actions.appendChild(closeButton);
+            this.contentEl.append(empty, actions);
+            return;
+        }
+        const result = document.createElement("div");
+        result.className = "replace-memory-cleanup-result";
+        const heading = document.createElement("div");
+        heading.className = "replace-memory-cleanup-result-title";
+        heading.textContent = this.plugin.t("cleanupReady");
+        const count = document.createElement("div");
+        count.className = "replace-memory-cleanup-result-count";
+        count.textContent = `${this.plugin.t("unusedImagesFound")}：${this.items.length} ${this.plugin.t("imageCount")} · ${formatBytes(this.totalSize())}`;
+        const note = document.createElement("div");
+        note.className = "replace-memory-cleanup-result-note";
+        note.textContent = this.plugin.t("cleanupSafeNote");
+        result.append(heading, count, note);
+        const actions = document.createElement("div");
+        actions.className = "replace-memory-cleanup-actions";
+        const cancelButton = document.createElement("button");
+        cancelButton.type = "button";
+        cancelButton.textContent = this.plugin.t("cancel");
+        cancelButton.addEventListener("click", () => this.close());
+        const trashButton = document.createElement("button");
+        trashButton.type = "button";
+        trashButton.className = "mod-warning";
+        trashButton.textContent = this.plugin.t("confirmDeleteImages");
+        trashButton.addEventListener("click", () => void this.moveAllToTrash(trashButton));
+        actions.append(cancelButton, trashButton);
+        this.contentEl.append(result, actions);
+    }
+    async moveAllToTrash(button) {
+        if (this.items.length === 0)
+            return;
+        button.disabled = true;
+        const paths = this.items.map((file) => file.path);
+        const result = await this.plugin.trashImages(paths);
+        if (result.deleted > 0)
+            new obsidian_1.Notice(`${this.plugin.t("deletedImages")}：${result.deleted} ${this.plugin.t("imageCount")}`);
+        if (result.failed > 0)
+            new obsidian_1.Notice(this.plugin.t("cleanupDeleteFailed"));
+        this.close();
+    }
+    onClose() {
+        this.contentEl.replaceChildren();
     }
 }
 class QuickReferenceModal extends obsidian_1.Modal {
