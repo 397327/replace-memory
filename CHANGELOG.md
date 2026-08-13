@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.10
+
+- Added batch note export from the file explorer.
+- Ctrl-click Markdown files to select multiple notes without opening them.
+- Added **Markdown + image attachments** export.
+- Added **continuous long-page PDF** export, one PDF per note, without A4 page gaps.
+- Embedded local note images into exported PDFs instead of leaving image links.
+- Remembered the last export folder between sessions.
+- Highlighted **Export selected notes / 导出所选笔记** in orange in the file context menu.
+
 ## 0.1.9
 
 - Added **Locate reference source / 定位此引用** to jump from an inserted block reference back to its original paragraph.

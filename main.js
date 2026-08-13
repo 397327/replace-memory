@@ -19,6 +19,7 @@ function makeDefaultSettings() {
         pages: [firstPage],
         activePageId: firstPage.id,
         pendingReference: null,
+        lastExportFolder: "",
     };
 }
 const TEXT = {
@@ -97,6 +98,32 @@ const TEXT = {
         cleanupReady: "扫描完成",
         cleanupSafeNote: "以下图片已通过多重引用检查；点击后将全部移入 Obsidian 回收站。",
         close: "关闭",
+        exportNotes: "导出所选笔记",
+        exportNotesCommand: "导出所选笔记",
+        exportMode: "导出方式",
+        exportMarkdownAssets: "Markdown + 图片附件",
+        exportPdfContinuous: "连续长页 PDF",
+        exportPdfHint: "每个 Markdown 单独生成一个 PDF，不按 A4 分页，中间没有分页空白。",
+        exportFolder: "导出到",
+        exportFolderPlaceholder: "请选择导出文件夹",
+        chooseExportFolder: "选择目录",
+        selectedExportNotes: "已选择 {count} 篇笔记",
+        exportFolderRequired: "请先选择导出目录。",
+        exportFolderDialogFailed: "无法打开文件夹选择窗口。",
+        selectNotes: "选择笔记",
+        searchNotes: "搜索笔记…",
+        selectedNotes: "已选择",
+        selectAllNotes: "全选",
+        clearSelection: "清空选择",
+        startExport: "开始导出",
+        exporting: "正在导出…",
+        exportDone: "导出完成",
+        exportFailed: "导出失败，请检查后重试。",
+        exportNoFiles: "请至少选择一个 Markdown 文件。",
+        exportPdfDesktopOnly: "连续长页 PDF 目前仅支持 Obsidian 桌面版。",
+        exportBrowserMissing: "未找到 Microsoft Edge、Google Chrome 或 Chromium，无法生成连续长页 PDF。",
+        exportOutput: "输出位置",
+        exportOpenFolderHint: "导出完成：",
     },
     en: {
         open: "Open replacement memory",
@@ -173,6 +200,32 @@ const TEXT = {
         cleanupReady: "Scan complete",
         cleanupSafeNote: "These images passed multiple reference checks. Continuing moves all of them to the Obsidian trash.",
         close: "Close",
+        exportNotes: "Export selected notes",
+        exportNotesCommand: "Export selected notes",
+        exportMode: "Export mode",
+        exportMarkdownAssets: "Markdown + image attachments",
+        exportPdfContinuous: "Continuous long-page PDF",
+        exportPdfHint: "Each Markdown file becomes one PDF without A4-style page gaps.",
+        exportFolder: "Export to",
+        exportFolderPlaceholder: "Choose an export folder",
+        chooseExportFolder: "Choose folder",
+        selectedExportNotes: "{count} note(s) selected",
+        exportFolderRequired: "Choose an export folder first.",
+        exportFolderDialogFailed: "Could not open the folder picker.",
+        selectNotes: "Select notes",
+        searchNotes: "Search notes…",
+        selectedNotes: "Selected",
+        selectAllNotes: "Select all",
+        clearSelection: "Clear selection",
+        startExport: "Export",
+        exporting: "Exporting…",
+        exportDone: "Export complete",
+        exportFailed: "Export failed. Please review and try again.",
+        exportNoFiles: "Select at least one Markdown file.",
+        exportPdfDesktopOnly: "Continuous long-page PDF is currently available on desktop only.",
+        exportBrowserMissing: "Microsoft Edge, Google Chrome, or Chromium was not found, so PDF export cannot run.",
+        exportOutput: "Output",
+        exportOpenFolderHint: "Export complete: ",
     },
 };
 function makeRule() {
@@ -346,6 +399,7 @@ function parseSettings(value) {
         pages,
         activePageId,
         pendingReference: sanitizePendingReference(value.pendingReference),
+        lastExportFolder: typeof value.lastExportFolder === "string" ? value.lastExportFolder : "",
     };
 }
 function countOccurrences(text, search) {
@@ -382,6 +436,9 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         this.settings = makeDefaultSettings();
         this.language = "en";
         this.contextReferenceTarget = null;
+        this.exportSelectedPaths = new Set();
+        this.exportSelectionRenderQueued = false;
+        this.exportSelectionGesturePath = null;
     }
     async onload() {
         this.language = navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -449,7 +506,190 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
             name: this.t("imageCleanupCommand"),
             callback: () => this.openImageCleanup(),
         });
+        if (obsidian_1.Platform.isDesktopApp) {
+            // Obsidian uses Ctrl/Cmd + click to open notes. For export selection we
+            // intercept that gesture only inside the file explorer and turn it into
+            // a toggleable multi-selection without opening the note.
+            // Capture Ctrl/Cmd + click at the window level before the file explorer
+            // can interpret it as "open note". Pointerdown toggles selection; all
+            // follow-up mouse/pointer events for that gesture are swallowed.
+            const exportPointerDown = (event) => this.handleExportSelectionPointerDown(event);
+            const exportSuppress = (event) => this.handleExportSelectionSuppression(event);
+            window.addEventListener("pointerdown", exportPointerDown, true);
+            window.addEventListener("mousedown", exportSuppress, true);
+            window.addEventListener("pointerup", exportSuppress, true);
+            window.addEventListener("mouseup", exportSuppress, true);
+            window.addEventListener("click", exportSuppress, true);
+            window.addEventListener("dblclick", exportSuppress, true);
+            this.register(() => {
+                window.removeEventListener("pointerdown", exportPointerDown, true);
+                window.removeEventListener("mousedown", exportSuppress, true);
+                window.removeEventListener("pointerup", exportSuppress, true);
+                window.removeEventListener("mouseup", exportSuppress, true);
+                window.removeEventListener("click", exportSuppress, true);
+                window.removeEventListener("dblclick", exportSuppress, true);
+            });
+            this.registerDomEvent(document, "click", (event) => {
+                this.handleExportSelectionClick(event);
+            }, true);
+            this.registerDomEvent(document, "contextmenu", () => {
+                this.queueExportSelectionRender();
+            }, true);
+            if (document.body && typeof MutationObserver !== "undefined") {
+                const observer = new MutationObserver(() => {
+                    if (this.exportSelectedPaths.size > 0)
+                        this.queueExportSelectionRender();
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+                this.register(() => observer.disconnect());
+            }
+            this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+                if (!file || String(file.extension || "").toLowerCase() !== "md")
+                    return;
+                const exportFiles = this.exportFilesForContext(file);
+                menu.addItem((item) => {
+                    item.setTitle(this.exportMenuTitle(exportFiles.length));
+                    item.setIcon("download");
+                    item.setSection("replace-memory-export");
+                    item.onClick(() => this.openExportNotes(exportFiles));
+                });
+            }));
+            this.registerEvent(this.app.workspace.on("files-menu", (menu, files) => {
+                const markdownFiles = Array.isArray(files)
+                    ? files.filter((file) => file && String(file.extension || "").toLowerCase() === "md")
+                    : [];
+                if (markdownFiles.length === 0)
+                    return;
+                menu.addItem((item) => {
+                    item.setTitle(this.exportMenuTitle(markdownFiles.length));
+                    item.setIcon("download");
+                    item.setSection("replace-memory-export");
+                    item.onClick(() => this.openExportNotes(markdownFiles));
+                });
+            }));
+        }
         this.addSettingTab(new ReplaceMemorySettingTab(this.app, this));
+    }
+    exportMenuTitle(count) {
+        if (count > 1)
+            return this.language === "zh" ? `导出所选笔记（${count}）` : `Export selected notes (${count})`;
+        return this.t("exportNotes");
+    }
+    fileExplorerTitleFromTarget(target) {
+        if (!(target instanceof Element))
+            return null;
+        return target.closest(".nav-file-title");
+    }
+    filePathFromExplorerTitle(title) {
+        if (!title)
+            return null;
+        const direct = title.getAttribute("data-path") || (title.dataset ? title.dataset.path : "");
+        if (direct)
+            return (0, obsidian_1.normalizePath)(direct);
+        const pathHost = title.closest("[data-path]");
+        const hosted = pathHost ? pathHost.getAttribute("data-path") : "";
+        if (hosted)
+            return (0, obsidian_1.normalizePath)(hosted);
+        const name = String((title.querySelector(".nav-file-title-content") || title).textContent || "").trim();
+        if (!name)
+            return null;
+        const matches = this.app.vault.getFiles().filter((file) => file.name === name || file.basename === name);
+        return matches.length === 1 ? matches[0].path : null;
+    }
+    markdownFileFromExplorerEvent(event) {
+        const title = this.fileExplorerTitleFromTarget(event.target);
+        if (!title)
+            return null;
+        const path = this.filePathFromExplorerTitle(title);
+        if (!path)
+            return null;
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof obsidian_1.TFile) || String(file.extension || "").toLowerCase() !== "md")
+            return null;
+        return { title, file };
+    }
+    handleExportSelectionPointerDown(event) {
+        if (event.button !== 0 || (!event.ctrlKey && !event.metaKey))
+            return;
+        const hit = this.markdownFileFromExplorerEvent(event);
+        if (!hit)
+            return;
+        this.exportSelectionGesturePath = hit.file.path;
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function")
+            event.stopImmediatePropagation();
+        if (this.exportSelectedPaths.has(hit.file.path))
+            this.exportSelectedPaths.delete(hit.file.path);
+        else
+            this.exportSelectedPaths.add(hit.file.path);
+        this.queueExportSelectionRender();
+    }
+    handleExportSelectionSuppression(event) {
+        if ((!event.ctrlKey && !event.metaKey) || (typeof event.button === "number" && event.button !== 0))
+            return;
+        const hit = this.markdownFileFromExplorerEvent(event);
+        if (!hit)
+            return;
+        // Suppress the complete Ctrl/Cmd-click gesture. The selection itself is
+        // toggled only once, on pointerdown. This prevents Obsidian's native
+        // Ctrl-click handler from opening the note in a tab.
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function")
+            event.stopImmediatePropagation();
+        if (event.type === "click" || event.type === "dblclick" || event.type === "mouseup" || event.type === "pointerup")
+            this.exportSelectionGesturePath = null;
+    }
+    handleExportSelectionClick(event) {
+        const hit = this.markdownFileFromExplorerEvent(event);
+        if (!hit)
+            return;
+        if (event.ctrlKey || event.metaKey) {
+            // The selection was already toggled on pointerdown. Swallow the
+            // follow-up click so Obsidian does not open the note.
+            event.preventDefault();
+            event.stopPropagation();
+            if (typeof event.stopImmediatePropagation === "function")
+                event.stopImmediatePropagation();
+            return;
+        }
+        // A normal click returns the file explorer to its native single-file
+        // behavior and clears our temporary export selection.
+        if (this.exportSelectedPaths.size > 0) {
+            this.exportSelectedPaths.clear();
+            this.queueExportSelectionRender();
+        }
+    }
+    exportFilesForContext(file) {
+        if (this.exportSelectedPaths.has(file.path)) {
+            const files = [];
+            for (const path of this.exportSelectedPaths) {
+                const selected = this.app.vault.getAbstractFileByPath(path);
+                if (selected instanceof obsidian_1.TFile && String(selected.extension || "").toLowerCase() === "md")
+                    files.push(selected);
+            }
+            files.sort((a, b) => a.path.localeCompare(b.path));
+            if (files.length > 0)
+                return files;
+        }
+        return [file];
+    }
+    queueExportSelectionRender() {
+        if (this.exportSelectionRenderQueued)
+            return;
+        this.exportSelectionRenderQueued = true;
+        requestAnimationFrame(() => {
+            this.exportSelectionRenderQueued = false;
+            this.renderExportSelection();
+        });
+    }
+    renderExportSelection() {
+        const titles = document.querySelectorAll(".nav-file-title");
+        for (const title of titles) {
+            const path = this.filePathFromExplorerTitle(title);
+            title.classList.toggle("replace-memory-export-selected", !!path && this.exportSelectedPaths.has(path));
+        }
     }
     t(key) {
         return TEXT[this.language][key];
@@ -996,6 +1236,647 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
     openImageCleanup() {
         new UnusedImageCleanupModal(this.app, this).open();
     }
+    openExportNotes(files = []) {
+        const markdownFiles = Array.isArray(files)
+            ? files.filter((file) => file && String(file.extension || "").toLowerCase() === "md")
+            : [];
+        if (markdownFiles.length === 0) {
+            new obsidian_1.Notice(this.t("exportNoFiles"));
+            return;
+        }
+        new ExportNotesModal(this.app, this, markdownFiles).open();
+    }
+    async pickExportDirectory(currentPath = "") {
+        if (!obsidian_1.Platform.isDesktopApp)
+            throw new Error(this.t("exportPdfDesktopOnly"));
+        let dialog = null;
+        try {
+            const remote = require("@electron/remote");
+            dialog = remote && remote.dialog ? remote.dialog : null;
+        }
+        catch (_a) {
+        }
+        if (!dialog) {
+            try {
+                const electron = require("electron");
+                dialog = (electron && electron.dialog) || (electron && electron.remote && electron.remote.dialog) || null;
+            }
+            catch (_b) {
+            }
+        }
+        if (!dialog || typeof dialog.showOpenDialog !== "function")
+            throw new Error(this.t("exportFolderDialogFailed"));
+        const result = await dialog.showOpenDialog({
+            title: this.t("exportFolder"),
+            defaultPath: currentPath || undefined,
+            properties: ["openDirectory", "createDirectory"],
+        });
+        if (!result || result.canceled || !Array.isArray(result.filePaths) || !result.filePaths[0])
+            return null;
+        return result.filePaths[0];
+    }
+    uniqueFsPath(folder, baseName, extension = "", asDirectory = false) {
+        const fs = require("fs");
+        const path = require("path");
+        const safeBase = this.safeExportName(baseName);
+        const ext = extension ? (String(extension).startsWith(".") ? String(extension) : `.${extension}`) : "";
+        let index = 1;
+        while (true) {
+            const suffix = index === 1 ? "" : `-${index}`;
+            const candidate = path.join(folder, `${safeBase}${suffix}${asDirectory ? "" : ext}`);
+            if (!fs.existsSync(candidate))
+                return candidate;
+            index += 1;
+        }
+    }
+    sanitizeExportFolder(value) {
+        const cleaned = String(value || "Replace Memory Export")
+            .replace(/\\/g, "/")
+            .split("/")
+            .map((part) => part.trim().replace(/[<>:"|?*]/g, "-").replace(/^\.+$/, "-"))
+            .filter((part) => part.length > 0 && part !== "." && part !== "..")
+            .join("/");
+        return cleaned || "Replace Memory Export";
+    }
+    safeExportName(value) {
+        const cleaned = String(value || "note").trim().replace(/[<>:"/\\|?*]/g, "-").replace(/[. ]+$/g, "");
+        return cleaned || "note";
+    }
+    async ensureVaultFolder(path) {
+        const parts = String(path || "").replace(/\\/g, "/").split("/").filter(Boolean);
+        let current = "";
+        for (const part of parts) {
+            current = current ? `${current}/${part}` : part;
+            const existing = this.app.vault.getAbstractFileByPath(current);
+            if (!existing)
+                await this.app.vault.createFolder(current);
+        }
+    }
+    async uniqueVaultPath(folder, baseName, extension = "") {
+        const safeBase = this.safeExportName(baseName);
+        const ext = extension ? (extension.startsWith(".") ? extension : `.${extension}`) : "";
+        let index = 1;
+        while (true) {
+            const suffix = index === 1 ? "" : `-${index}`;
+            const candidate = `${folder}/${safeBase}${suffix}${ext}`;
+            if (!this.app.vault.getAbstractFileByPath(candidate))
+                return candidate;
+            index += 1;
+        }
+    }
+    getLiveMarkdownText(file) {
+        try {
+            const leaves = this.app.workspace.getLeavesOfType("markdown");
+            for (const leaf of leaves) {
+                const view = leaf && leaf.view;
+                if (view && view.file && view.file.path === file.path && view.editor && typeof view.editor.getValue === "function")
+                    return view.editor.getValue();
+            }
+        }
+        catch (_a) {
+        }
+        return null;
+    }
+    async readMarkdownForExport(file) {
+        const live = this.getLiveMarkdownText(file);
+        return live !== null ? live : await this.app.vault.read(file);
+    }
+    resolveExportImage(rawLink, sourcePath) {
+        let target = String(rawLink || "").trim();
+        if (!target)
+            return null;
+        if (target.startsWith("<") && target.endsWith(">"))
+            target = target.slice(1, -1);
+        target = target.split("|")[0].trim();
+        target = cleanLinkTarget(target);
+        if (!target || /^(?:https?:|data:|obsidian:|app:|mailto:|tel:)/i.test(target))
+            return null;
+        const normalized = target.replace(/\\/g, "/").replace(/^\.\//, "");
+        const direct = this.app.vault.getAbstractFileByPath(normalized.replace(/^\/+/, ""));
+        if (direct && isImageFile(direct))
+            return direct;
+        const resolved = this.app.metadataCache.getFirstLinkpathDest(normalized, sourcePath);
+        return resolved && isImageFile(resolved) ? resolved : null;
+    }
+    async exportMarkdownWithAssets(file, batchFolder) {
+        const folderPath = await this.uniqueVaultPath(batchFolder, file.basename, "");
+        await this.ensureVaultFolder(folderPath);
+        const attachmentsFolder = `${folderPath}/attachments`;
+        let content = await this.readMarkdownForExport(file);
+        const assets = new Map();
+        const usedNames = new Set();
+        const assignAsset = (image) => {
+            if (assets.has(image.path))
+                return assets.get(image.path);
+            const rawExt = image.extension ? `.${image.extension}` : "";
+            const rawBase = this.safeExportName(image.basename || image.name || "image");
+            let name = `${rawBase}${rawExt}`;
+            let index = 2;
+            while (usedNames.has(name.toLowerCase())) {
+                name = `${rawBase}-${index}${rawExt}`;
+                index += 1;
+            }
+            usedNames.add(name.toLowerCase());
+            assets.set(image.path, name);
+            return name;
+        };
+        const replacements = [];
+        for (const match of content.matchAll(/!\[\[([^\]]+)\]\]/g)) {
+            if (match.index === undefined)
+                continue;
+            const inner = String(match[1] || "");
+            const image = this.resolveExportImage(inner, file.path);
+            if (!image)
+                continue;
+            const name = assignAsset(image);
+            replacements.push({ start: match.index, end: match.index + match[0].length, text: `![](<attachments/${name}>)` });
+        }
+        for (const match of content.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)) {
+            if (match.index === undefined)
+                continue;
+            let destination = String(match[2] || "").trim();
+            if (destination.startsWith("<")) {
+                const close = destination.indexOf(">");
+                if (close > 0)
+                    destination = destination.slice(1, close);
+            }
+            else {
+                destination = destination.replace(/\s+(?:"[^"]*"|'[^']*')\s*$/, "").trim();
+            }
+            const image = this.resolveExportImage(destination, file.path);
+            if (!image)
+                continue;
+            const name = assignAsset(image);
+            const alt = String(match[1] || "");
+            replacements.push({ start: match.index, end: match.index + match[0].length, text: `![${alt}](<attachments/${name}>)` });
+        }
+        replacements.sort((left, right) => right.start - left.start);
+        for (const replacement of replacements)
+            content = content.slice(0, replacement.start) + replacement.text + content.slice(replacement.end);
+        if (assets.size > 0)
+            await this.ensureVaultFolder(attachmentsFolder);
+        for (const [sourcePath, name] of assets.entries()) {
+            const source = this.app.vault.getAbstractFileByPath(sourcePath);
+            if (!source)
+                continue;
+            const data = await this.app.vault.readBinary(source);
+            await this.app.vault.createBinary(`${attachmentsFolder}/${name}`, data);
+        }
+        await this.app.vault.create(`${folderPath}/${this.safeExportName(file.basename)}.md`, content);
+        return folderPath;
+    }
+    async blobToDataUrl(blob) {
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(reader.error || new Error("Failed to read image"));
+            reader.readAsDataURL(blob);
+        });
+    }
+    exportDocumentCss() {
+        return `
+html,body{margin:0;padding:0;background:#fff;color:#1f2328;}
+body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",Arial,sans-serif;}
+.rm-export-note{width:794px;box-sizing:border-box;padding:48px 58px;font-size:16px;line-height:1.72;overflow-wrap:anywhere;}
+h1,h2,h3,h4,h5,h6{line-height:1.3;margin:1.35em 0 .65em;font-weight:650;color:#111827;}
+h1{font-size:2em;border-bottom:1px solid #e5e7eb;padding-bottom:.3em;} h2{font-size:1.55em;border-bottom:1px solid #eef0f2;padding-bottom:.25em;} h3{font-size:1.28em;}
+p{margin:.7em 0;} a{color:#315efb;text-decoration:none;} strong{font-weight:700;} em{font-style:italic;}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:4px solid #d0d7de;color:#57606a;background:#f6f8fa;}
+pre,code{font-family:Consolas,"SFMono-Regular",monospace;} code{background:#f3f4f6;padding:.12em .3em;border-radius:4px;} pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f6f8fa;padding:14px;border-radius:7px;} pre code{background:transparent;padding:0;}
+ul,ol{padding-left:1.7em;} li{margin:.22em 0;} hr{border:0;border-top:1px solid #d8dee4;margin:1.6em 0;}
+table{width:100%;border-collapse:collapse;margin:1em 0;} th,td{border:1px solid #d0d7de;padding:6px 9px;vertical-align:top;} th{background:#f6f8fa;}
+img{display:block;max-width:100%;height:auto;margin:1em auto;} .internal-embed{max-width:100%;}
+.callout{border:1px solid #d8dee4;border-radius:8px;padding:10px 14px;margin:1em 0;background:#f8fafc;}
+@page{margin:0;}\n`;
+    }
+    async imageFileToDataUrl(file) {
+        const mimeByExt = {
+            png: "image/png",
+            jpg: "image/jpeg",
+            jpeg: "image/jpeg",
+            gif: "image/gif",
+            webp: "image/webp",
+            svg: "image/svg+xml",
+            bmp: "image/bmp",
+            avif: "image/avif",
+        };
+        const data = await this.app.vault.readBinary(file);
+        const mime = mimeByExt[String(file.extension || "").toLowerCase()] || "application/octet-stream";
+        return await this.blobToDataUrl(new Blob([data], { type: mime }));
+    }
+    escapeHtmlAttribute(value) {
+        return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+    }
+    async inlineLocalImagesForPdf(markdown, sourcePath) {
+        const replacements = [];
+        const addImageReplacement = async (start, end, rawTarget, altText, sizeHint) => {
+            const image = this.resolveExportImage(rawTarget, sourcePath);
+            if (!image)
+                return;
+            try {
+                const dataUrl = await this.imageFileToDataUrl(image);
+                const alt = this.escapeHtmlAttribute(altText || image.basename || image.name || "image");
+                let sizeAttr = "";
+                const size = String(sizeHint || "").trim();
+                const sizeMatch = size.match(/^(\d+)(?:x(\d+))?$/i);
+                if (sizeMatch) {
+                    sizeAttr += ` width="${sizeMatch[1]}"`;
+                    if (sizeMatch[2])
+                        sizeAttr += ` height="${sizeMatch[2]}"`;
+                }
+                replacements.push({ start, end, text: `<img src="${dataUrl}" alt="${alt}"${sizeAttr}>` });
+            }
+            catch (_a) {
+            }
+        };
+        for (const match of markdown.matchAll(/!\[\[([^\]]+)\]\]/g)) {
+            if (match.index === undefined)
+                continue;
+            const inner = String(match[1] || "");
+            const parts = inner.split("|");
+            const rawTarget = parts[0] || "";
+            const hint = parts.length > 1 ? parts[parts.length - 1] : "";
+            await addImageReplacement(match.index, match.index + match[0].length, rawTarget, cleanLinkTarget(rawTarget).split("/").pop() || "image", hint);
+        }
+        for (const match of markdown.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)) {
+            if (match.index === undefined)
+                continue;
+            let destination = String(match[2] || "").trim();
+            if (destination.startsWith("<")) {
+                const close = destination.indexOf(">");
+                if (close > 0)
+                    destination = destination.slice(1, close);
+            }
+            else {
+                destination = destination.replace(/\s+(?:"[^"]*"|'[^']*')\s*$/, "").trim();
+            }
+            await addImageReplacement(match.index, match.index + match[0].length, destination, String(match[1] || ""), "");
+        }
+        replacements.sort((left, right) => right.start - left.start);
+        let result = markdown;
+        for (const replacement of replacements)
+            result = result.slice(0, replacement.start) + replacement.text + result.slice(replacement.end);
+        return result;
+    }
+    async renderMarkdownToStandaloneHtml(file) {
+        const sourceMarkdown = await this.readMarkdownForExport(file);
+        const markdown = await this.inlineLocalImagesForPdf(sourceMarkdown, file.path);
+        const holder = document.createElement("div");
+        holder.className = "markdown-rendered rm-export-render-source";
+        document.body.appendChild(holder);
+        try {
+            await obsidian_1.MarkdownRenderer.renderMarkdown(markdown, holder, file.path, this);
+            await new Promise((resolve) => window.setTimeout(resolve, 80));
+            const images = Array.from(holder.querySelectorAll("img"));
+            for (const image of images) {
+                const src = image.getAttribute("src");
+                if (!src || src.startsWith("data:"))
+                    continue;
+                try {
+                    const response = await fetch(src);
+                    if (!response.ok)
+                        continue;
+                    const blob = await response.blob();
+                    image.setAttribute("src", await this.blobToDataUrl(blob));
+                }
+                catch (_a) {
+                }
+            }
+            const title = this.safeExportName(file.basename).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+            return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>${this.exportDocumentCss()}</style></head><body><main class="rm-export-note">${holder.innerHTML}</main></body></html>`;
+        }
+        finally {
+            holder.remove();
+        }
+    }
+    findChromiumExecutable() {
+        if (!obsidian_1.Platform.isDesktopApp)
+            return null;
+        const fs = require("fs");
+        const path = require("path");
+        const childProcess = require("child_process");
+        const platform = process.platform;
+        const candidates = [];
+        if (platform === "win32") {
+            const env = process.env;
+            const roots = [env.PROGRAMFILES, env["PROGRAMFILES(X86)"], env.LOCALAPPDATA].filter(Boolean);
+            for (const root of roots) {
+                candidates.push(path.join(root, "Microsoft", "Edge", "Application", "msedge.exe"));
+                candidates.push(path.join(root, "Google", "Chrome", "Application", "chrome.exe"));
+                candidates.push(path.join(root, "Chromium", "Application", "chrome.exe"));
+            }
+        }
+        else if (platform === "darwin") {
+            candidates.push("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge");
+            candidates.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+            candidates.push("/Applications/Chromium.app/Contents/MacOS/Chromium");
+        }
+        else {
+            for (const name of ["microsoft-edge", "microsoft-edge-stable", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
+                try {
+                    const result = childProcess.spawnSync("which", [name], { encoding: "utf8" });
+                    const found = String(result.stdout || "").trim();
+                    if (found)
+                        candidates.push(found);
+                }
+                catch (_a) {
+                }
+            }
+        }
+        return candidates.find((candidate) => {
+            try {
+                return fs.existsSync(candidate);
+            }
+            catch (_a) {
+                return false;
+            }
+        }) || null;
+    }
+    async nodeHttpJson(port, requestPath) {
+        const http = require("http");
+        return await new Promise((resolve, reject) => {
+            const request = http.request({ hostname: "127.0.0.1", port, path: requestPath, method: "GET" }, (response) => {
+                let body = "";
+                response.setEncoding("utf8");
+                response.on("data", (chunk) => body += chunk);
+                response.on("end", () => {
+                    try {
+                        resolve(JSON.parse(body));
+                    }
+                    catch (error) {
+                        reject(error);
+                    }
+                });
+            });
+            request.on("error", reject);
+            request.end();
+        });
+    }
+    async waitForDevToolsPort(profileDir) {
+        const fs = require("fs");
+        const path = require("path");
+        const file = path.join(profileDir, "DevToolsActivePort");
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+            if (fs.existsSync(file)) {
+                const first = String(fs.readFileSync(file, "utf8")).split(/\r?\n/)[0];
+                const port = Number(first);
+                if (Number.isFinite(port) && port > 0)
+                    return port;
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 50));
+        }
+        throw new Error("DevTools port was not created");
+    }
+    async connectCdp(webSocketUrl) {
+        return await new Promise((resolve, reject) => {
+            const socket = new WebSocket(webSocketUrl);
+            let nextId = 0;
+            const pending = new Map();
+            socket.addEventListener("open", () => {
+                resolve({
+                    socket,
+                    send: (method, params = {}) => new Promise((resolveCommand, rejectCommand) => {
+                        const id = ++nextId;
+                        pending.set(id, { resolve: resolveCommand, reject: rejectCommand });
+                        socket.send(JSON.stringify({ id, method, params }));
+                    }),
+                });
+            });
+            socket.addEventListener("message", (event) => {
+                let message;
+                try {
+                    message = JSON.parse(String(event.data || "{}"));
+                }
+                catch (_a) {
+                    return;
+                }
+                if (!message.id || !pending.has(message.id))
+                    return;
+                const handler = pending.get(message.id);
+                pending.delete(message.id);
+                if (message.error)
+                    handler.reject(new Error(message.error.message || "CDP command failed"));
+                else
+                    handler.resolve(message.result);
+            });
+            socket.addEventListener("error", () => reject(new Error("Unable to connect to PDF renderer")));
+        });
+    }
+    async htmlToContinuousPdf(html) {
+        if (!obsidian_1.Platform.isDesktopApp)
+            throw new Error(this.t("exportPdfDesktopOnly"));
+        const browser = this.findChromiumExecutable();
+        if (!browser)
+            throw new Error(this.t("exportBrowserMissing"));
+        const fs = require("fs");
+        const path = require("path");
+        const os = require("os");
+        const childProcess = require("child_process");
+        const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "replace-memory-pdf-"));
+        const args = ["--headless=new", "--disable-gpu", "--remote-debugging-port=0", "--remote-allow-origins=*", `--user-data-dir=${profileDir}`, "about:blank"];
+        if (process.platform === "linux")
+            args.unshift("--no-sandbox");
+        const processHandle = childProcess.spawn(browser, args, { stdio: "ignore", windowsHide: true });
+        let cdp = null;
+        try {
+            const port = await this.waitForDevToolsPort(profileDir);
+            const targets = await this.nodeHttpJson(port, "/json/list");
+            const target = Array.isArray(targets) ? targets.find((entry) => entry && entry.type === "page" && entry.webSocketDebuggerUrl) : null;
+            if (!target)
+                throw new Error("No PDF renderer page was created");
+            let lastCdpError = null;
+            for (let attempt = 0; attempt < 20 && !cdp; attempt += 1) {
+                try {
+                    cdp = await this.connectCdp(target.webSocketDebuggerUrl);
+                }
+                catch (error) {
+                    lastCdpError = error;
+                    await new Promise((resolve) => window.setTimeout(resolve, 100));
+                }
+            }
+            if (!cdp)
+                throw lastCdpError || new Error("Unable to connect to PDF renderer");
+            await cdp.send("Page.enable");
+            const frameTree = await cdp.send("Page.getFrameTree");
+            const frameId = frameTree && frameTree.frameTree && frameTree.frameTree.frame && frameTree.frameTree.frame.id;
+            if (!frameId)
+                throw new Error("No renderer frame was created");
+            await cdp.send("Page.setDocumentContent", { frameId, html });
+            await cdp.send("Runtime.evaluate", {
+                expression: `Promise.all([document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve(),Promise.all(Array.from(document.images).map(function(img){return img.complete?Promise.resolve():new Promise(function(resolve){img.onload=resolve;img.onerror=resolve;});}))]).then(function(){return true;})`,
+                awaitPromise: true,
+                returnByValue: true,
+            });
+            const dimensionsResult = await cdp.send("Runtime.evaluate", {
+                expression: `JSON.stringify({width:Math.max(document.documentElement.scrollWidth,document.body.scrollWidth),height:Math.max(document.documentElement.scrollHeight,document.body.scrollHeight)})`,
+                returnByValue: true,
+            });
+            const dimensions = JSON.parse(dimensionsResult.result.value);
+            const pixelWidth = Math.max(794, Number(dimensions.width) || 794);
+            const pixelHeight = Math.max(300, Number(dimensions.height) || 300);
+            let scale = 1;
+            let paperWidth = (pixelWidth + 2) / 96;
+            let paperHeight = (pixelHeight + 20) / 96;
+            // Chromium/PDF viewers cap a single page near 200 inches. Keep one page and
+            // proportionally scale only exceptionally long notes.
+            if (paperHeight > 198) {
+                scale = Math.max(0.1, 198 / paperHeight);
+                paperHeight = 198;
+                paperWidth = Math.max(1, paperWidth * scale);
+            }
+            const result = await cdp.send("Page.printToPDF", {
+                landscape: false,
+                displayHeaderFooter: false,
+                printBackground: true,
+                scale,
+                paperWidth,
+                paperHeight,
+                marginTop: 0,
+                marginBottom: 0,
+                marginLeft: 0,
+                marginRight: 0,
+                preferCSSPageSize: false,
+                transferMode: "ReturnAsBase64",
+            });
+            return result.data;
+        }
+        finally {
+            try {
+                if (cdp && cdp.socket)
+                    cdp.socket.close();
+            }
+            catch (_a) {
+            }
+            try {
+                processHandle.kill();
+            }
+            catch (_b) {
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 120));
+            try {
+                fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 4, retryDelay: 80 });
+            }
+            catch (_c) {
+            }
+        }
+    }
+    async exportContinuousPdf(file, batchFolder) {
+        const html = await this.renderMarkdownToStandaloneHtml(file);
+        const base64 = await this.htmlToContinuousPdf(html);
+        const buffer = Buffer.from(base64, "base64");
+        const outputPath = await this.uniqueVaultPath(batchFolder, file.basename, "pdf");
+        const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+        await this.app.vault.createBinary(outputPath, arrayBuffer);
+        return outputPath;
+    }
+    async exportNotes(files, mode, folder) {
+        const safeFolder = this.sanitizeExportFolder(folder);
+        await this.ensureVaultFolder(safeFolder);
+        const now = new Date();
+        const pad = (value) => String(value).padStart(2, "0");
+        const batchName = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        const batchFolder = await this.uniqueVaultPath(safeFolder, batchName, "");
+        await this.ensureVaultFolder(batchFolder);
+        const outputs = [];
+        for (const file of files) {
+            if (mode === "pdf")
+                outputs.push(await this.exportContinuousPdf(file, batchFolder));
+            else
+                outputs.push(await this.exportMarkdownWithAssets(file, batchFolder));
+        }
+        return { batchFolder, outputs };
+    }
+    async exportMarkdownWithAssetsExternal(file, outputDirectory) {
+        const fs = require("fs");
+        const path = require("path");
+        const folderPath = this.uniqueFsPath(outputDirectory, file.basename, "", true);
+        fs.mkdirSync(folderPath, { recursive: true });
+        const attachmentsFolder = path.join(folderPath, "attachments");
+        let content = await this.readMarkdownForExport(file);
+        const assets = new Map();
+        const usedNames = new Set();
+        const assignAsset = (image) => {
+            if (assets.has(image.path))
+                return assets.get(image.path);
+            const rawExt = image.extension ? `.${image.extension}` : "";
+            const rawBase = this.safeExportName(image.basename || image.name || "image");
+            let name = `${rawBase}${rawExt}`;
+            let index = 2;
+            while (usedNames.has(name.toLowerCase())) {
+                name = `${rawBase}-${index}${rawExt}`;
+                index += 1;
+            }
+            usedNames.add(name.toLowerCase());
+            assets.set(image.path, name);
+            return name;
+        };
+        const replacements = [];
+        for (const match of content.matchAll(/!\[\[([^\]]+)\]\]/g)) {
+            if (match.index === undefined)
+                continue;
+            const inner = String(match[1] || "");
+            const image = this.resolveExportImage(inner, file.path);
+            if (!image)
+                continue;
+            const name = assignAsset(image);
+            replacements.push({ start: match.index, end: match.index + match[0].length, text: `![](<attachments/${name}>)` });
+        }
+        for (const match of content.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)) {
+            if (match.index === undefined)
+                continue;
+            let destination = String(match[2] || "").trim();
+            if (destination.startsWith("<")) {
+                const close = destination.indexOf(">");
+                if (close > 0)
+                    destination = destination.slice(1, close);
+            }
+            else {
+                destination = destination.replace(/\s+(?:"[^"]*"|'[^']*')\s*$/, "").trim();
+            }
+            const image = this.resolveExportImage(destination, file.path);
+            if (!image)
+                continue;
+            const name = assignAsset(image);
+            const alt = String(match[1] || "");
+            replacements.push({ start: match.index, end: match.index + match[0].length, text: `![${alt}](<attachments/${name}>)` });
+        }
+        replacements.sort((left, right) => right.start - left.start);
+        for (const replacement of replacements)
+            content = content.slice(0, replacement.start) + replacement.text + content.slice(replacement.end);
+        if (assets.size > 0)
+            fs.mkdirSync(attachmentsFolder, { recursive: true });
+        for (const [sourcePath, name] of assets.entries()) {
+            const source = this.app.vault.getAbstractFileByPath(sourcePath);
+            if (!source)
+                continue;
+            const data = await this.app.vault.readBinary(source);
+            fs.writeFileSync(path.join(attachmentsFolder, name), Buffer.from(new Uint8Array(data)));
+        }
+        fs.writeFileSync(path.join(folderPath, `${this.safeExportName(file.basename)}.md`), content, "utf8");
+        return folderPath;
+    }
+    async exportContinuousPdfExternal(file, outputDirectory) {
+        const fs = require("fs");
+        const html = await this.renderMarkdownToStandaloneHtml(file);
+        const base64 = await this.htmlToContinuousPdf(html);
+        const outputPath = this.uniqueFsPath(outputDirectory, file.basename, "pdf", false);
+        fs.writeFileSync(outputPath, Buffer.from(base64, "base64"));
+        return outputPath;
+    }
+    async exportNotesExternal(files, mode, outputDirectory) {
+        const fs = require("fs");
+        if (!outputDirectory)
+            throw new Error(this.t("exportFolderRequired"));
+        fs.mkdirSync(outputDirectory, { recursive: true });
+        const outputs = [];
+        for (const file of files) {
+            if (mode === "pdf")
+                outputs.push(await this.exportContinuousPdfExternal(file, outputDirectory));
+            else
+                outputs.push(await this.exportMarkdownWithAssetsExternal(file, outputDirectory));
+        }
+        return { outputDirectory, outputs };
+    }
     resolveReferencedImage(rawLink, sourcePath, referencedPaths, imageIndex) {
         const targetText = cleanLinkTarget(rawLink);
         if (!targetText || /^(?:https?:|data:|obsidian:|app:|mailto:|tel:)/i.test(targetText))
@@ -1448,6 +2329,152 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         return row;
     }
 }
+class ExportNotesModal extends obsidian_1.Modal {
+    constructor(app, plugin, files) {
+        super(app);
+        this.plugin = plugin;
+        this.files = Array.isArray(files) ? files : [];
+        this.mode = "markdown";
+        this.outputFolder = typeof plugin.settings.lastExportFolder === "string" ? plugin.settings.lastExportFolder : "";
+        this.exporting = false;
+    }
+    onOpen() {
+        this.modalEl.classList.add("replace-memory-export-modal", "replace-memory-export-modal-compact");
+        this.setTitle(this.plugin.t("exportNotes"));
+        this.render();
+    }
+    async chooseFolder() {
+        if (this.exporting)
+            return;
+        try {
+            const selected = await this.plugin.pickExportDirectory(this.outputFolder);
+            if (selected) {
+                this.outputFolder = selected;
+                this.plugin.settings.lastExportFolder = selected;
+                await this.plugin.saveSettings();
+                this.render();
+            }
+        }
+        catch (error) {
+            console.error("[Replace Memory] Folder picker failed", error);
+            new obsidian_1.Notice(error && error.message ? error.message : this.plugin.t("exportFolderDialogFailed"));
+        }
+    }
+    render() {
+        this.contentEl.replaceChildren();
+        const summary = document.createElement("div");
+        summary.className = "replace-memory-export-summary";
+        summary.textContent = this.plugin.formatText("selectedExportNotes", { count: String(this.files.length) });
+        const modeSection = document.createElement("div");
+        modeSection.className = "replace-memory-export-section";
+        const modeTitle = document.createElement("div");
+        modeTitle.className = "replace-memory-export-section-title";
+        modeTitle.textContent = this.plugin.t("exportMode");
+        const modeOptions = document.createElement("div");
+        modeOptions.className = "replace-memory-export-mode-list";
+        const makeMode = (value, labelText, hintText) => {
+            const label = document.createElement("label");
+            label.className = `replace-memory-export-mode-row${this.mode === value ? " is-active" : ""}`;
+            const input = document.createElement("input");
+            input.type = "radio";
+            input.name = "replace-memory-export-mode";
+            input.value = value;
+            input.checked = this.mode === value;
+            input.disabled = this.exporting;
+            input.addEventListener("change", () => {
+                this.mode = value;
+                this.render();
+            });
+            const textWrap = document.createElement("span");
+            const title = document.createElement("strong");
+            title.textContent = labelText;
+            textWrap.appendChild(title);
+            if (hintText) {
+                const hint = document.createElement("small");
+                hint.textContent = hintText;
+                textWrap.appendChild(hint);
+            }
+            label.append(input, textWrap);
+            return label;
+        };
+        modeOptions.append(
+            makeMode("markdown", this.plugin.t("exportMarkdownAssets"), ""),
+            makeMode("pdf", this.plugin.t("exportPdfContinuous"), this.plugin.t("exportPdfHint"))
+        );
+        modeSection.append(modeTitle, modeOptions);
+        const folderSection = document.createElement("div");
+        folderSection.className = "replace-memory-export-section";
+        const folderTitle = document.createElement("div");
+        folderTitle.className = "replace-memory-export-section-title";
+        folderTitle.textContent = this.plugin.t("exportFolder");
+        const folderRow = document.createElement("div");
+        folderRow.className = "replace-memory-export-folder-row";
+        const folderInput = document.createElement("input");
+        folderInput.type = "text";
+        folderInput.className = "replace-memory-export-folder";
+        folderInput.value = this.outputFolder;
+        folderInput.placeholder = this.plugin.t("exportFolderPlaceholder");
+        folderInput.readOnly = false;
+        folderInput.disabled = this.exporting;
+        folderInput.addEventListener("input", () => this.outputFolder = folderInput.value);
+        const chooseButton = document.createElement("button");
+        chooseButton.type = "button";
+        chooseButton.textContent = this.plugin.t("chooseExportFolder");
+        chooseButton.disabled = this.exporting;
+        chooseButton.addEventListener("click", () => void this.chooseFolder());
+        folderRow.append(folderInput, chooseButton);
+        folderSection.append(folderTitle, folderRow);
+        const footer = document.createElement("div");
+        footer.className = "replace-memory-export-footer";
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.textContent = this.plugin.t("cancel");
+        cancel.disabled = this.exporting;
+        cancel.addEventListener("click", () => this.close());
+        const exportButton = document.createElement("button");
+        exportButton.type = "button";
+        exportButton.className = "mod-cta";
+        exportButton.textContent = this.exporting ? this.plugin.t("exporting") : this.plugin.t("startExport");
+        exportButton.disabled = this.exporting;
+        exportButton.addEventListener("click", () => void this.runExport());
+        footer.append(cancel, exportButton);
+        this.contentEl.append(summary, modeSection, folderSection, footer);
+    }
+    async runExport() {
+        if (this.files.length === 0) {
+            new obsidian_1.Notice(this.plugin.t("exportNoFiles"));
+            return;
+        }
+        if (!this.outputFolder) {
+            await this.chooseFolder();
+            if (!this.outputFolder)
+                return;
+        }
+        if (this.mode === "pdf" && !obsidian_1.Platform.isDesktopApp) {
+            new obsidian_1.Notice(this.plugin.t("exportPdfDesktopOnly"));
+            return;
+        }
+        this.plugin.settings.lastExportFolder = this.outputFolder;
+        await this.plugin.saveSettings();
+        this.exporting = true;
+        this.render();
+        try {
+            const result = await this.plugin.exportNotesExternal(this.files, this.mode, this.outputFolder);
+            new obsidian_1.Notice(`${this.plugin.t("exportDone")} · ${result.outputs.length} · ${result.outputDirectory}`, 7000);
+            this.close();
+        }
+        catch (error) {
+            console.error("[Replace Memory] Export failed", error);
+            new obsidian_1.Notice(error && error.message ? error.message : this.plugin.t("exportFailed"), 7000);
+            this.exporting = false;
+            this.render();
+        }
+    }
+    onClose() {
+        this.contentEl.replaceChildren();
+    }
+}
+
 class UnusedImageCleanupModal extends obsidian_1.Modal {
     constructor(app, plugin) {
         super(app);

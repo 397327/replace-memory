@@ -1,8 +1,8 @@
 # Replace Memory（记忆替换）
 
-**An Obsidian plugin that remembers common replacement rules, applies them with one click, reuses block references, locates their sources, and cleans unused images.**
+**An Obsidian plugin that remembers common replacement rules, applies them with one click, reuses block references, locates their sources, cleans unused images, and exports notes with attachments or continuous PDFs.**
 
-**一款带记忆的一键替换 Obsidian 插件，同时支持规则分页、引用复制/粘贴与定位，以及未引用图片清理。**
+**一款带记忆的一键替换 Obsidian 插件，同时支持规则分页、引用复制/粘贴与定位、未引用图片清理，以及批量导出 Markdown+附件或连续长页 PDF。**
 
 ## Features / 功能
 
@@ -18,6 +18,8 @@
   右键已插入的引用即可跳回并定位原始段落。
 - **Clean unused images / 清理未引用图** — Scan the vault for high-confidence unused images, show the detected count and total size, then move them to the Obsidian trash after confirmation.  
   扫描知识库中确定未被引用的图片，显示数量和占用空间，确认后统一移入 Obsidian 回收站。
+- **Export notes / 导出笔记** — Ctrl-click one or more Markdown files in the file explorer, then export them as Markdown with image attachments or as one continuous long-page PDF per note. The last export folder is remembered.  
+  在文件列表中 Ctrl 多选 Markdown 笔记，可批量导出“Markdown + 图片附件”或“一篇笔记一个连续长页 PDF”，并记住上次导出目录。
 - **Local-only / 本地运行** — No network requests, telemetry, or note uploads.  
   所有处理均在本地完成。
 
@@ -43,6 +45,12 @@
 
 Open Replace Memory and click **Clean unused images / 清理未引用图**. The plugin scans the vault, reports the number and total size of images it can confidently classify as unused, then asks whether to move them to the Obsidian trash. The scanner is intentionally conservative: uncertain images are kept rather than deleted.
 
+### Export notes / 导出笔记
+
+In the Obsidian file explorer, hold `Ctrl` and click one or more Markdown files. Right-click an selected note and choose **Export selected notes / 导出所选笔记**. Choose either **Markdown + image attachments** or **Continuous long-page PDF**, select an output folder, and export. PDF mode creates one PDF per note and embeds local note images.
+
+中文：在文件列表中按住 `Ctrl` 选择一个或多个 Markdown 文件 → 右键“导出所选笔记” → 选择“Markdown + 图片附件”或“连续长页 PDF” → 选择导出目录。PDF 模式每篇笔记单独生成一个连续长页 PDF，并保留笔记中的本地图片。
+
 ## Commands / 命令
 
 - Open replacement memory / 打开记忆替换
@@ -51,6 +59,7 @@ Open Replace Memory and click **Clean unused images / 清理未引用图**. The 
 - Paste reference / 粘贴引用
 - Locate reference source / 定位此引用
 - Clean unused images / 清理未引用图
+- Export selected notes / 导出所选笔记
 
 ## Manual installation / 手动安装
 

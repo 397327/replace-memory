@@ -1,9 +1,9 @@
 {
   "id": "replace-memory",
   "name": "Replace Memory",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "minAppVersion": "1.5.0",
-  "description": "Remember replacement rules, reuse block references, and clean unused images from your vault.",
+  "description": "Remember replacement rules, reuse block references, clean unused images, and export notes with attachments or continuous PDFs.",
   "author": "zoe",
   "isDesktopOnly": false
 }

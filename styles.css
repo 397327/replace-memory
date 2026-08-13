@@ -17,9 +17,12 @@
 }
 
 .replace-memory-titlebar .replace-memory-title-action {
-  margin-left: auto;
   flex: 0 0 auto;
   min-height: 30px;
+}
+
+.replace-memory-titlebar .replace-memory-title-action:first-of-type {
+  margin-left: auto;
 }
 
 .replace-memory-description {
@@ -338,3 +341,248 @@
   }
 }
 
+
+
+/* Note export */
+.replace-memory-export-modal {
+  width: min(720px, calc(100vw - 28px));
+}
+
+.replace-memory-export-section {
+  margin-bottom: 16px;
+}
+
+.replace-memory-export-section-title {
+  margin-bottom: 7px;
+  font-weight: 600;
+}
+
+.replace-memory-export-mode-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.replace-memory-export-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  cursor: pointer;
+}
+
+.replace-memory-export-mode.is-active {
+  border-color: var(--interactive-accent);
+}
+
+.replace-memory-export-mode input {
+  margin-top: 3px;
+}
+
+.replace-memory-export-mode span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.replace-memory-export-mode small {
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.replace-memory-export-folder,
+.replace-memory-export-search {
+  width: 100%;
+}
+
+.replace-memory-export-selection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.replace-memory-export-selection-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.replace-memory-export-selection-actions button {
+  min-height: 28px;
+  padding: 2px 8px;
+}
+
+.replace-memory-export-search {
+  margin-bottom: 7px;
+}
+
+.replace-memory-export-file-list {
+  max-height: min(44vh, 420px);
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+.replace-memory-export-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 9px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.replace-memory-export-file-row:last-child {
+  border-bottom: 0;
+}
+
+.replace-memory-export-file-row:hover {
+  background: var(--background-secondary);
+}
+
+.replace-memory-export-file-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replace-memory-export-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rm-export-render-source {
+  position: fixed;
+  left: -100000px;
+  top: 0;
+  width: 794px;
+  pointer-events: none;
+}
+
+@media (max-width: 680px) {
+  .replace-memory-export-modal {
+    width: calc(100vw - 18px);
+  }
+
+  .replace-memory-export-mode-options {
+    grid-template-columns: 1fr;
+  }
+
+  .replace-memory-export-selection-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .replace-memory-export-footer {
+    flex-direction: column-reverse;
+  }
+
+  .replace-memory-export-footer button {
+    width: 100%;
+  }
+}
+
+/* Compact export dialog opened from the file explorer context menu */
+.replace-memory-export-modal-compact {
+  width: min(560px, calc(100vw - 28px));
+}
+
+.replace-memory-export-summary {
+  margin: 2px 0 16px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-medium);
+}
+
+.replace-memory-export-mode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.replace-memory-export-mode-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  cursor: pointer;
+}
+
+.replace-memory-export-mode-row.is-active {
+  border-color: var(--interactive-accent);
+}
+
+.replace-memory-export-mode-row input {
+  margin-top: 3px;
+}
+
+.replace-memory-export-mode-row > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.replace-memory-export-mode-row small {
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.replace-memory-export-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.replace-memory-export-folder-row .replace-memory-export-folder {
+  min-width: 0;
+  cursor: pointer;
+}
+
+@media (max-width: 520px) {
+  .replace-memory-export-folder-row {
+    grid-template-columns: 1fr;
+  }
+
+  .replace-memory-export-folder-row button {
+    width: 100%;
+  }
+}
+
+
+/* Ctrl/Cmd multi-selection for note export in Obsidian's file explorer. */
+.nav-file-title.replace-memory-export-selected {
+  background: var(--background-modifier-hover);
+  box-shadow: inset 3px 0 0 var(--interactive-accent);
+}
+
+.nav-file-title.replace-memory-export-selected .nav-file-title-content {
+  color: var(--text-normal);
+  font-weight: var(--font-medium);
+}
+
+
+/* Highlight Replace Memory's export command in the file explorer context menu. */
+.menu-item[data-section="replace-memory-export"] {
+  color: #f59e0b;
+  background-color: rgba(245, 158, 11, 0.10);
+}
+
+.menu-item[data-section="replace-memory-export"]:hover {
+  color: #fb923c;
+  background-color: rgba(245, 158, 11, 0.18);
+}
+
+.menu-item[data-section="replace-memory-export"] .menu-item-icon,
+.menu-item[data-section="replace-memory-export"] .menu-item-title {
+  color: inherit;
+}
