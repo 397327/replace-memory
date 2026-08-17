@@ -50,7 +50,9 @@ const TEXT = {
         from: "查找",
         to: "替换为",
         addPage: "添加页面",
+        dragPage: "拖动调整页面顺序",
         renamePage: "重命名页面",
+        duplicatePage: "复制页面",
         deletePage: "删除页面",
         confirmDeletePage: "确定删除页面“{name}”及其中的全部规则吗？",
         cannotDeleteLastPage: "至少需要保留一个页面。",
@@ -152,7 +154,9 @@ const TEXT = {
         from: "Find",
         to: "Replace with",
         addPage: "Add page",
+        dragPage: "Drag to reorder pages",
         renamePage: "Rename page",
+        duplicatePage: "Duplicate page",
         deletePage: "Delete page",
         confirmDeletePage: "Delete page “{name}” and all rules on it?",
         cannotDeleteLastPage: "At least one page must remain.",
@@ -769,6 +773,52 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         this.settings.activePageId = page.id;
         await this.saveSettings();
     }
+    nextDuplicatePageName(sourceName) {
+        const names = new Set(this.settings.pages.map((page) => page.name));
+        const suffix = this.language === "zh" ? " 副本" : " Copy";
+        const base = `${sourceName}${suffix}`;
+        if (!names.has(base))
+            return base;
+        let index = 2;
+        while (names.has(`${base} ${index}`))
+            index += 1;
+        return `${base} ${index}`;
+    }
+    async duplicatePage(pageId) {
+        const pageIndex = this.settings.pages.findIndex((page) => page.id === pageId);
+        if (pageIndex === -1)
+            return false;
+        const source = this.settings.pages[pageIndex];
+        const copiedRules = source.rules.map((rule) => ({
+            ...rule,
+            id: makeId(),
+        }));
+        const copy = makePage(this.nextDuplicatePageName(source.name), copiedRules);
+        this.settings.pages.splice(pageIndex + 1, 0, copy);
+        this.settings.activePageId = copy.id;
+        await this.saveSettings();
+        return true;
+    }
+    async movePageRelative(sourceId, targetId, after = false) {
+        if (!sourceId || !targetId || sourceId === targetId)
+            return false;
+        const pages = this.settings.pages;
+        const sourceIndex = pages.findIndex((page) => page.id === sourceId);
+        if (sourceIndex === -1)
+            return false;
+        const [source] = pages.splice(sourceIndex, 1);
+        if (!source)
+            return false;
+        const targetIndex = pages.findIndex((page) => page.id === targetId);
+        if (targetIndex === -1) {
+            pages.splice(sourceIndex, 0, source);
+            return false;
+        }
+        const insertIndex = targetIndex + (after ? 1 : 0);
+        pages.splice(insertIndex, 0, source);
+        await this.saveSettings();
+        return true;
+    }
     async renamePage(pageId, requestedName) {
         const page = this.settings.pages.find((entry) => entry.id === pageId);
         if (!page)
@@ -1302,6 +1352,19 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         const cleaned = String(value || "note").trim().replace(/[<>:"/\\|?*]/g, "-").replace(/[. ]+$/g, "");
         return cleaned || "note";
     }
+    exportHierarchyName(file) {
+        const rawPath = String((file && file.path) || (file && file.name) || "note")
+            .replace(/\\/g, "/")
+            .replace(/^\/+|\/+$/g, "");
+        const withoutExtension = rawPath.replace(/\.[^/.]+$/i, "");
+        const parts = withoutExtension
+            .split("/")
+            .map((part) => this.safeExportName(part))
+            .filter((part) => part.length > 0);
+        if (parts.length === 0)
+            return this.safeExportName(file && file.basename ? file.basename : "note");
+        return this.safeExportName(parts.join("_"));
+    }
     async ensureVaultFolder(path) {
         const parts = String(path || "").replace(/\\/g, "/").split("/").filter(Boolean);
         let current = "";
@@ -1359,7 +1422,8 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         return resolved && isImageFile(resolved) ? resolved : null;
     }
     async exportMarkdownWithAssets(file, batchFolder) {
-        const folderPath = await this.uniqueVaultPath(batchFolder, file.basename, "");
+        const exportName = this.exportHierarchyName(file);
+        const folderPath = await this.uniqueVaultPath(batchFolder, exportName, "");
         await this.ensureVaultFolder(folderPath);
         const attachmentsFolder = `${folderPath}/attachments`;
         let content = await this.readMarkdownForExport(file);
@@ -1422,7 +1486,7 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
             const data = await this.app.vault.readBinary(source);
             await this.app.vault.createBinary(`${attachmentsFolder}/${name}`, data);
         }
-        await this.app.vault.create(`${folderPath}/${this.safeExportName(file.basename)}.md`, content);
+        await this.app.vault.create(`${folderPath}/${exportName}.md`, content);
         return folderPath;
     }
     async blobToDataUrl(blob) {
@@ -1542,7 +1606,7 @@ img{display:block;max-width:100%;height:auto;margin:1em auto;} .internal-embed{m
                 catch (_a) {
                 }
             }
-            const title = this.safeExportName(file.basename).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+            const title = this.exportHierarchyName(file).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
             return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>${this.exportDocumentCss()}</style></head><body><main class="rm-export-note">${holder.innerHTML}</main></body></html>`;
         }
         finally {
@@ -1764,7 +1828,7 @@ img{display:block;max-width:100%;height:auto;margin:1em auto;} .internal-embed{m
         const html = await this.renderMarkdownToStandaloneHtml(file);
         const base64 = await this.htmlToContinuousPdf(html);
         const buffer = Buffer.from(base64, "base64");
-        const outputPath = await this.uniqueVaultPath(batchFolder, file.basename, "pdf");
+        const outputPath = await this.uniqueVaultPath(batchFolder, this.exportHierarchyName(file), "pdf");
         const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
         await this.app.vault.createBinary(outputPath, arrayBuffer);
         return outputPath;
@@ -1789,7 +1853,8 @@ img{display:block;max-width:100%;height:auto;margin:1em auto;} .internal-embed{m
     async exportMarkdownWithAssetsExternal(file, outputDirectory) {
         const fs = require("fs");
         const path = require("path");
-        const folderPath = this.uniqueFsPath(outputDirectory, file.basename, "", true);
+        const exportName = this.exportHierarchyName(file);
+        const folderPath = this.uniqueFsPath(outputDirectory, exportName, "", true);
         fs.mkdirSync(folderPath, { recursive: true });
         const attachmentsFolder = path.join(folderPath, "attachments");
         let content = await this.readMarkdownForExport(file);
@@ -1852,14 +1917,14 @@ img{display:block;max-width:100%;height:auto;margin:1em auto;} .internal-embed{m
             const data = await this.app.vault.readBinary(source);
             fs.writeFileSync(path.join(attachmentsFolder, name), Buffer.from(new Uint8Array(data)));
         }
-        fs.writeFileSync(path.join(folderPath, `${this.safeExportName(file.basename)}.md`), content, "utf8");
+        fs.writeFileSync(path.join(folderPath, `${exportName}.md`), content, "utf8");
         return folderPath;
     }
     async exportContinuousPdfExternal(file, outputDirectory) {
         const fs = require("fs");
         const html = await this.renderMarkdownToStandaloneHtml(file);
         const base64 = await this.htmlToContinuousPdf(html);
-        const outputPath = this.uniqueFsPath(outputDirectory, file.basename, "pdf", false);
+        const outputPath = this.uniqueFsPath(outputDirectory, this.exportHierarchyName(file), "pdf", false);
         fs.writeFileSync(outputPath, Buffer.from(base64, "base64"));
         return outputPath;
     }
@@ -2093,6 +2158,8 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         super(app);
         this.plugin = plugin;
         this.draggedId = null;
+        this.draggedPageId = null;
+        this.suppressPageClickUntil = 0;
     }
     onOpen() {
         this.modalEl.classList.add("replace-memory-modal");
@@ -2153,17 +2220,67 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
             pageButton.type = "button";
             pageButton.className = `replace-memory-page-button${isActive ? " is-active" : ""}`;
             pageButton.textContent = page.name;
-            pageButton.title = this.plugin.pageText(page.name);
+            pageButton.title = `${this.plugin.pageText(page.name)} · ${this.plugin.t("dragPage")}`;
             pageButton.setAttribute("aria-label", this.plugin.pageText(page.name));
             pageButton.setAttribute("role", "tab");
             pageButton.setAttribute("aria-selected", isActive ? "true" : "false");
+            pageButton.dataset.pageId = page.id;
+            pageButton.draggable = true;
             pageButton.addEventListener("click", async () => {
+                if (Date.now() < this.suppressPageClickUntil)
+                    return;
                 await this.plugin.setActivePage(page.id);
                 this.render();
             });
             pageButton.addEventListener("contextmenu", (event) => {
                 event.preventDefault();
                 this.showPageMenu(event, page);
+            });
+            pageButton.addEventListener("dragstart", (event) => {
+                this.draggedPageId = page.id;
+                pageButton.classList.add("is-page-dragging");
+                pageButton.setAttribute("aria-grabbed", "true");
+                if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("application/x-replace-memory-page", page.id);
+                    event.dataTransfer.setData("text/plain", page.id);
+                }
+            });
+            pageButton.addEventListener("dragover", (event) => {
+                if (!this.draggedPageId || this.draggedPageId === page.id)
+                    return;
+                event.preventDefault();
+                if (event.dataTransfer)
+                    event.dataTransfer.dropEffect = "move";
+                pageTabs
+                    .querySelectorAll(".replace-memory-page-button.is-drop-before, .replace-memory-page-button.is-drop-after")
+                    .forEach((element) => element.classList.remove("is-drop-before", "is-drop-after"));
+                const rect = pageButton.getBoundingClientRect();
+                const after = event.clientX >= rect.left + rect.width / 2;
+                pageButton.classList.add(after ? "is-drop-after" : "is-drop-before");
+            });
+            pageButton.addEventListener("dragleave", (event) => {
+                const related = event.relatedTarget;
+                if (related instanceof Node && pageButton.contains(related))
+                    return;
+                pageButton.classList.remove("is-drop-before", "is-drop-after");
+            });
+            pageButton.addEventListener("drop", async (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const sourceId = this.draggedPageId ||
+                    (event.dataTransfer ? event.dataTransfer.getData("application/x-replace-memory-page") : "");
+                const after = pageButton.classList.contains("is-drop-after");
+                this.clearPageDragIndicators(pageTabs);
+                this.draggedPageId = null;
+                this.suppressPageClickUntil = Date.now() + 250;
+                if (await this.plugin.movePageRelative(sourceId, page.id, after))
+                    this.render();
+            });
+            pageButton.addEventListener("dragend", () => {
+                this.clearPageDragIndicators(pageTabs);
+                this.draggedPageId = null;
+                this.suppressPageClickUntil = Date.now() + 250;
             });
             pageTabs.appendChild(pageButton);
         }
@@ -2188,6 +2305,15 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         footer.append(addButton, pageTabs, runAllButton);
         contentEl.appendChild(footer);
     }
+    clearPageDragIndicators(pageTabs = null) {
+        const root = pageTabs || this.contentEl;
+        root
+            .querySelectorAll(".replace-memory-page-button.is-page-dragging, .replace-memory-page-button.is-drop-before, .replace-memory-page-button.is-drop-after")
+            .forEach((element) => {
+            element.classList.remove("is-page-dragging", "is-drop-before", "is-drop-after");
+            element.removeAttribute("aria-grabbed");
+        });
+    }
     showPageMenu(event, page) {
         const menu = new obsidian_1.Menu();
         menu.addItem((item) => {
@@ -2195,6 +2321,14 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
             item.setIcon("pencil");
             item.onClick(() => {
                 new RenamePageModal(this.app, this.plugin, page, () => this.render()).open();
+            });
+        });
+        menu.addItem((item) => {
+            item.setTitle(this.plugin.t("duplicatePage"));
+            item.setIcon("copy");
+            item.onClick(async () => {
+                if (await this.plugin.duplicatePage(page.id))
+                    this.render();
             });
         });
         menu.addItem((item) => {

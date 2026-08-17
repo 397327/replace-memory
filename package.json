@@ -1,7 +1,7 @@
 {
   "name": "replace-memory",
-  "version": "0.1.10",
-  "description": "An Obsidian plugin that remembers replacement rules, reuses block references, cleans unused images, and exports notes with attachments or continuous PDFs.",
+  "version": "0.1.11",
+  "description": "An Obsidian plugin that remembers replacement rules, reuses block references, cleans unused images, exports notes, supports page duplication, and draggable page ordering.",
   "main": "main.js",
   "type": "module",
   "scripts": {

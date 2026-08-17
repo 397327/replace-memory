@@ -586,3 +586,34 @@
 .menu-item[data-section="replace-memory-export"] .menu-item-title {
   color: inherit;
 }
+
+
+/* v0.1.12 — page tab drag/reorder */
+.replace-memory-page-button:not(.replace-memory-add-page-button) {
+  cursor: grab;
+}
+
+.replace-memory-page-button:not(.replace-memory-add-page-button):active {
+  cursor: grabbing;
+}
+
+.replace-memory-page-button.is-page-dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.replace-memory-page-button.is-drop-before {
+  box-shadow: -3px 0 0 var(--interactive-accent);
+}
+
+.replace-memory-page-button.is-drop-after {
+  box-shadow: 3px 0 0 var(--interactive-accent);
+}
+
+.replace-memory-page-button.is-active.is-drop-before {
+  box-shadow: -3px 0 0 var(--text-on-accent);
+}
+
+.replace-memory-page-button.is-active.is-drop-after {
+  box-shadow: 3px 0 0 var(--text-on-accent);
+}

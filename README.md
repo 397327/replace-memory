@@ -20,6 +20,12 @@
   扫描知识库中确定未被引用的图片，显示数量和占用空间，确认后统一移入 Obsidian 回收站。
 - **Export notes / 导出笔记** — Ctrl-click one or more Markdown files in the file explorer, then export them as Markdown with image attachments or as one continuous long-page PDF per note. The last export folder is remembered.  
   在文件列表中 Ctrl 多选 Markdown 笔记，可批量导出“Markdown + 图片附件”或“一篇笔记一个连续长页 PDF”，并记住上次导出目录。
+- **Duplicate pages / 复制页面** — Right-click a replacement-rule page tab to create an independent copy with the same rules, order, and enabled states.  
+  右键替换规则页签即可复制出独立副本，保留规则、顺序与启用状态。
+- **Drag page tabs / 拖拽页面排序** — Drag replacement-rule page tabs left or right to reorder them; the new order is remembered automatically.  
+  直接拖动替换规则页签即可调整页面顺序，并自动保存。
+- **Hierarchical export names / 层级导出命名** — Export names include the vault-relative folder hierarchy, e.g. `A/B/D.md` → `A_B_D.pdf`.  
+  导出文件默认按知识库内文件夹层级命名，例如 `A/B/D.md` → `A_B_D.pdf`。
 - **Local-only / 本地运行** — No network requests, telemetry, or note uploads.  
   所有处理均在本地完成。
 

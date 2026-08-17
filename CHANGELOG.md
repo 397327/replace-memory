@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.11
+
+- Added **Duplicate page / 复制页面** to the page-tab context menu.
+- Duplicated pages keep all rules, order, and enabled states, but use independent rule IDs.
+- Added drag-and-drop reordering for replacement-rule pages and persist the new order.
+- Exported files now use their vault-relative folder hierarchy in the default filename, for example `A/B/D.md` → `A_B_D.pdf`.
+- The same hierarchical naming rule applies to PDF export and Markdown + image attachment export.
+
 ## 0.1.10
 
 - Added batch note export from the file explorer.
