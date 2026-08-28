@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.12
+
+- Added **Duplicate page / 复制页面** to the replacement-page context menu.
+- Added drag-and-drop reordering for replacement pages and automatic persistence of the new order.
+- Export filenames now include the vault-relative folder hierarchy, for example `A/B/D.md` → `A_B_D.pdf`.
+- New block reference IDs are now short 5-letter lowercase IDs; existing reference IDs remain compatible.
+
 ## 0.1.11
 
 - Added **Duplicate page / 复制页面** to the page-tab context menu.

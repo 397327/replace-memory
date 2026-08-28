@@ -306,9 +306,13 @@ function extractBlockId(line) {
     return (_a = match === null || match === void 0 ? void 0 : match[1]) !== null && _a !== void 0 ? _a : null;
 }
 function createReferenceId(usedIds) {
+    const letters = "abcdefghijklmnopqrstuvwxyz";
     let id = "";
     do {
-        id = `rmref-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        id = "";
+        for (let index = 0; index < 5; index += 1) {
+            id += letters[Math.floor(Math.random() * letters.length)];
+        }
     } while (usedIds.has(id));
     usedIds.add(id);
     return id;
