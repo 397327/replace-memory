@@ -59,6 +59,7 @@ const TEXT = {
         pageNamePrompt: "请输入页面名称",
         emptyPageName: "页面名称不能为空。",
         duplicatePageName: "已经存在同名页面。",
+        duplicateRuleFind: "查找内容“{find}”重复，出现在第 {numbers} 条规则。",
         save: "保存",
         cancel: "取消",
         quickReference: "快速引用",
@@ -163,6 +164,7 @@ const TEXT = {
         pageNamePrompt: "Enter a page name",
         emptyPageName: "Page name cannot be empty.",
         duplicatePageName: "A page with this name already exists.",
+        duplicateRuleFind: "Duplicate find text \"{find}\" appears in rules {numbers}.",
         save: "Save",
         cancel: "Cancel",
         quickReference: "Quick reference",
@@ -2164,6 +2166,8 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         this.draggedId = null;
         this.draggedPageId = null;
         this.suppressPageClickUntil = 0;
+        this.ruleSaveTimer = null;
+        this.ruleSaveChain = Promise.resolve();
     }
     onOpen() {
         this.modalEl.classList.add("replace-memory-modal");
@@ -2178,8 +2182,10 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         this.render();
     }
     onClose() {
+        window.clearTimeout(this.ruleSaveTimer);
+        this.ruleSaveTimer = null;
         this.contentEl.replaceChildren();
-        void this.plugin.saveSettings();
+        this.ruleSaveChain = this.ruleSaveChain.then(() => this.plugin.saveSettings());
     }
     render() {
         const { contentEl } = this;
@@ -2202,6 +2208,7 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
             rules.forEach((rule, index) => {
                 list.appendChild(this.createRuleRow(rule, index));
             });
+            this.refreshDuplicateRuleIndicators();
         }
         const footer = document.createElement("div");
         footer.className = "replace-memory-footer";
@@ -2309,6 +2316,64 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         footer.append(addButton, pageTabs, runAllButton);
         contentEl.appendChild(footer);
     }
+    queueRuleSave(delay = 220) {
+        window.clearTimeout(this.ruleSaveTimer);
+        this.ruleSaveTimer = window.setTimeout(() => {
+            this.ruleSaveTimer = null;
+            this.ruleSaveChain = this.ruleSaveChain.then(() => this.plugin.saveSettings());
+        }, delay);
+    }
+    flushRuleSave() {
+        window.clearTimeout(this.ruleSaveTimer);
+        this.ruleSaveTimer = null;
+        this.ruleSaveChain = this.ruleSaveChain.then(() => this.plugin.saveSettings());
+        return this.ruleSaveChain;
+    }
+    duplicateRuleIndexes(rule) {
+        const find = String(rule && rule.find || "").trim();
+        if (!find)
+            return [];
+        const indexes = [];
+        const rules = this.plugin.getCurrentRules();
+        rules.forEach((entry, index) => {
+            if (String(entry && entry.find || "").trim() === find)
+                indexes.push(index + 1);
+        });
+        return indexes;
+    }
+    refreshDuplicateRuleIndicators() {
+        const rules = this.plugin.getCurrentRules();
+        const counts = new Map();
+        for (const rule of rules) {
+            const find = String(rule && rule.find || "").trim();
+            if (!find)
+                continue;
+            counts.set(find, (counts.get(find) || 0) + 1);
+        }
+        this.contentEl.querySelectorAll(".replace-memory-find[data-rule-id]").forEach((input) => {
+            const ruleId = input.dataset.ruleId;
+            const rule = rules.find((entry) => entry.id === ruleId);
+            const find = String(rule && rule.find || "").trim();
+            const duplicate = !!find && (counts.get(find) || 0) > 1;
+            input.classList.toggle("is-duplicate", duplicate);
+            if (duplicate)
+                input.setAttribute("data-duplicate", "true");
+            else
+                input.removeAttribute("data-duplicate");
+        });
+    }
+    warnIfDuplicateRule(rule) {
+        const indexes = this.duplicateRuleIndexes(rule);
+        if (indexes.length <= 1)
+            return false;
+        const find = String(rule.find || "").trim();
+        const template = this.plugin.t("duplicateRuleFind");
+        const message = template
+            .replace("{find}", find)
+            .replace("{numbers}", indexes.join("、"));
+        new obsidian_1.Notice(message);
+        return true;
+    }
     clearPageDragIndicators(pageTabs = null) {
         const root = pageTabs || this.contentEl;
         root
@@ -2397,11 +2462,22 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         findInput.value = rule.find;
         findInput.title = rule.find;
         findInput.setAttribute("aria-label", this.plugin.t("from"));
+        findInput.dataset.ruleId = rule.id;
         findInput.addEventListener("input", () => {
             rule.find = findInput.value;
             findInput.title = findInput.value;
-            void this.plugin.saveSettings();
+            this.refreshDuplicateRuleIndicators();
+            this.queueRuleSave();
         });
+        const commitFind = () => {
+            rule.find = findInput.value;
+            findInput.title = findInput.value;
+            this.refreshDuplicateRuleIndicators();
+            this.warnIfDuplicateRule(rule);
+            void this.flushRuleSave();
+        };
+        findInput.addEventListener("change", commitFind);
+        findInput.addEventListener("blur", commitFind);
         const arrow = document.createElement("span");
         arrow.className = "replace-memory-arrow";
         arrow.textContent = "→";
@@ -2416,8 +2492,15 @@ class ReplaceMemoryModal extends obsidian_1.Modal {
         replaceInput.addEventListener("input", () => {
             rule.replace = replaceInput.value;
             replaceInput.title = replaceInput.value;
-            void this.plugin.saveSettings();
+            this.queueRuleSave();
         });
+        const commitReplace = () => {
+            rule.replace = replaceInput.value;
+            replaceInput.title = replaceInput.value;
+            void this.flushRuleSave();
+        };
+        replaceInput.addEventListener("change", commitReplace);
+        replaceInput.addEventListener("blur", commitReplace);
         const actions = document.createElement("div");
         actions.className = "replace-memory-actions";
         const upButton = createIconButton("chevron-up", this.plugin.t("moveUp"));

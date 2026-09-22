@@ -1,11 +1,18 @@
 # Changelog
 
+## 0.1.13
+
+- Fixed editing of existing replacement rules: the original Find and Replace fields can now be edited directly and save reliably.
+- Added duplicate-rule warnings for repeated **Find** text on the current replacement page; duplicate entries are highlighted and a notice shows the affected rule numbers.
+
 ## 0.1.12
 
 - Added **Duplicate page / 复制页面** to the replacement-page context menu.
 - Added drag-and-drop reordering for replacement pages and automatic persistence of the new order.
 - Export filenames now include the vault-relative folder hierarchy, for example `A/B/D.md` → `A_B_D.pdf`.
 - New block reference IDs are now short 5-letter lowercase IDs; existing reference IDs remain compatible.
+- Existing replacement rules can be edited directly and now save reliably after editing.
+- Duplicate find text on the current page is highlighted and triggers a warning.
 
 ## 0.1.11
 

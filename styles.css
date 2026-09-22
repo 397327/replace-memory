@@ -617,3 +617,15 @@
 .replace-memory-page-button.is-active.is-drop-after {
   box-shadow: 3px 0 0 var(--text-on-accent);
 }
+
+
+/* v0.1.12 — duplicate replacement-rule warning */
+.replace-memory-find.is-duplicate {
+  border-color: var(--text-warning) !important;
+  box-shadow: 0 0 0 1px var(--text-warning);
+}
+
+.replace-memory-find.is-duplicate:focus {
+  border-color: var(--text-warning) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-warning) 35%, transparent);
+}
