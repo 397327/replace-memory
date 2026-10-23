@@ -1,0 +1,103 @@
+# Replace Memory（记忆替换）
+
+**An Obsidian plugin that remembers common replacement rules, applies them with one click, reuses block references, locates their sources, cleans unused images, and exports notes with attachments or continuous PDFs.**
+
+**一款带记忆的一键替换 Obsidian 插件，同时支持规则分页、引用复制/粘贴与定位、未引用图片清理，以及批量导出 Markdown+附件或连续长页 PDF。**
+
+## Features / 功能
+
+- **Replacement memory / 记忆替换** — Save common `Find → Replace` rules and run all enabled rules from top to bottom with one click.  
+  保存常用“查找 → 替换”规则，并按设定顺序一键执行。
+- **Named rule pages / 规则分页** — Create independent pages for different replacement needs, rename them, and delete them from the page context menu.  
+  不同替换需求可建立独立规则页，并支持自定义名称。
+- **Copy as reference / 复制为引用** — Right-click a paragraph, or select several paragraphs, to create reusable Obsidian block references. Existing block IDs are reused.  
+  当前段落或选中的多段文字可一键生成引用，已有块编号会自动复用。
+- **Paste reference / 粘贴引用** — Insert the most recently copied reference at the current cursor position, or paste with the system clipboard.  
+  在任意位置快速粘贴刚复制的引用。
+- **Locate reference source / 定位此引用** — Right-click an inserted reference to jump back to the corresponding source paragraph.  
+  右键已插入的引用即可跳回并定位原始段落。
+- **Clean unused images / 清理未引用图** — Scan the vault for high-confidence unused images, show the detected count and total size, then move them to the Obsidian trash after confirmation.  
+  扫描知识库中确定未被引用的图片，显示数量和占用空间，确认后统一移入 Obsidian 回收站。
+- **Export notes / 导出笔记** — Ctrl-click one or more Markdown files in the file explorer, then export them as Markdown with image attachments or as one continuous long-page PDF per note. The last export folder is remembered.  
+  在文件列表中 Ctrl 多选 Markdown 笔记，可批量导出“Markdown + 图片附件”或“一篇笔记一个连续长页 PDF”，并记住上次导出目录。
+- **Duplicate pages / 复制页面** — Right-click a replacement-rule page tab to create an independent copy with the same rules, order, and enabled states.  
+  右键替换规则页签即可复制出独立副本，保留规则、顺序与启用状态。
+- **Drag page tabs / 拖拽页面排序** — Drag replacement-rule page tabs left or right to reorder them; the new order is remembered automatically.  
+  直接拖动替换规则页签即可调整页面顺序，并自动保存。
+- **Hierarchical export names / 层级导出命名** — Export names include the vault-relative folder hierarchy, e.g. `A/B/D.md` → `A_B_D.pdf`.  
+  导出文件默认按知识库内文件夹层级命名，例如 `A/B/D.md` → `A_B_D.pdf`。
+- **Local-only / 本地运行** — No network requests, telemetry, or note uploads.  
+  所有处理均在本地完成。
+
+## Usage / 使用方法
+
+### Replacement memory / 记忆替换
+
+1. Open a Markdown note.
+2. Click the Replace Memory ribbon icon or run **Open replacement memory**.
+3. Add `Find → Replace` rules. Use `+` to create another rule page when needed.
+4. Reorder rules and click **Run all in order**.
+
+中文：打开笔记 → 打开“记忆替换” → 添加规则 → 调整顺序 → 点击“按顺序全部替换”。
+
+### References / 引用
+
+- Select any text, including only one line from several adjacent lines, then use **Copy as reference / 复制为引用**. Without a selection, the current line is used.
+- The source gains a short ID on the same line, e.g. `222222222 ^abcde`, **without adding blank lines**.
+- The copied link uses the selected text as its inline label: `[[Folder/Note#^abcde|222222222]]`.
+- Paste using normal paste or **Paste reference / 粘贴引用**; no blank lines are injected around it.
+- Click the rendered inline link in Reading View, or use **Locate reference source / 定位此引用** via the editor menu, to navigate to that exact source line. Existing `![[...]]` references continue to work.
+- **Note:** A marker placed in the middle of a Markdown paragraph is not necessarily recognized by Obsidian as a native block ID. Accurate per-line navigation for these links depends on Replace Memory being enabled. If the plugin is disabled, Obsidian may open the note without scrolling to that particular line. The inline link displays a static copy of the selected text; later edits to the source will not update the link label automatically.
+
+### Clean unused images / 清理未引用图
+
+Open Replace Memory and click **Clean unused images / 清理未引用图**. The plugin scans the vault, reports the number and total size of images it can confidently classify as unused, then asks whether to move them to the Obsidian trash. The scanner is intentionally conservative: uncertain images are kept rather than deleted.
+
+### Export notes / 导出笔记
+
+In the Obsidian file explorer, hold `Ctrl` and click one or more Markdown files. Right-click an selected note and choose **Export selected notes / 导出所选笔记**. Choose either **Markdown + image attachments** or **Continuous long-page PDF**, select an output folder, and export. PDF mode creates one PDF per note and embeds local note images.
+
+中文：在文件列表中按住 `Ctrl` 选择一个或多个 Markdown 文件 → 右键“导出所选笔记” → 选择“Markdown + 图片附件”或“连续长页 PDF” → 选择导出目录。PDF 模式每篇笔记单独生成一个连续长页 PDF，并保留笔记中的本地图片。
+
+## Commands / 命令
+
+- Open replacement memory / 打开记忆替换
+- Run all enabled rules on the current page in order / 按顺序执行当前页全部已启用规则
+- Copy as reference / 复制为引用
+- Paste reference / 粘贴引用
+- Locate reference source / 定位此引用
+- Clean unused images / 清理未引用图
+- Export selected notes / 导出所选笔记
+
+## Manual installation / 手动安装
+
+Download `main.js`, `manifest.json`, and `styles.css` from the latest release and place them in:
+
+```text
+<Vault>/.obsidian/plugins/replace-memory/
+```
+
+Restart or reload Obsidian, then enable **Replace Memory** under **Settings → Community plugins**.
+
+## Privacy
+
+Replace Memory is local-only. It makes no network requests and contains no telemetry.
+
+## Development
+
+Requires Node.js 18 or later.
+
+```bash
+npm install
+npm run dev
+```
+
+Production build:
+
+```bash
+npm run build
+```
+
+## License
+
+MIT © zoe
