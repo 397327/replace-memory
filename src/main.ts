@@ -1,5 +1,5 @@
 // @ts-nocheck
-// Source snapshot matching the released main.js for Replace Memory 0.1.13.
+// Source snapshot matching the released main.js for Replace Memory 0.1.15.
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const obsidian_1 = require("obsidian");
@@ -67,6 +67,8 @@ const TEXT = {
         quickReference: "快速引用",
         captureReference: "记录选中内容为待引用",
         copyCurrentReference: "复制为引用",
+        copySentenceReference: "复制单句引用",
+        copyParagraphReference: "复制整段引用",
         insertReference: "粘贴引用",
         locateReference: "定位此引用",
         noReferenceAtCursor: "请在已插入的引用上右键。",
@@ -78,7 +80,7 @@ const TEXT = {
         noParagraphAtCursor: "请在需要引用的段落内右键。",
         copyReferenceFailed: "复制引用失败，请重试。",
         noPendingReference: "目前没有可粘贴的引用。",
-        quickReferenceHelp: "选中文字后右键记录，再将光标放到目标位置插入引用。",
+        quickReferenceHelp: "选中任意行中的文字后记录引用，粘贴时直接插入行内链接，不增加空行。",
         pendingReference: "待引用内容",
         source: "来源",
         paragraphCount: "段数",
@@ -172,6 +174,8 @@ const TEXT = {
         quickReference: "Quick reference",
         captureReference: "Save selected text for reference",
         copyCurrentReference: "Copy as reference",
+        copySentenceReference: "Copy selected text as reference",
+        copyParagraphReference: "Copy whole paragraph as reference",
         insertReference: "Paste reference",
         locateReference: "Locate reference source",
         noReferenceAtCursor: "Right-click an inserted block reference first.",
@@ -183,7 +187,7 @@ const TEXT = {
         noParagraphAtCursor: "Right-click inside the paragraph you want to reference.",
         copyReferenceFailed: "Could not copy the reference. Please try again.",
         noPendingReference: "There is no copied reference to paste.",
-        quickReferenceHelp: "Select text and save it from the context menu, then place the cursor and insert the reference.",
+        quickReferenceHelp: "Select text on any line, save a reference, then paste an inline link without extra blank lines.",
         pendingReference: "Pending reference",
         source: "Source",
         paragraphCount: "Paragraphs",
@@ -333,6 +337,18 @@ function makeBlockPreview(lines) {
 function markdownLinkPath(path) {
     return path.replace(/\.md$/i, "");
 }
+function inlineReferenceAlias(value) {
+    return String(value || "")
+        .replace(/\r?\n/g, " ")
+        .replace(/\\/g, "\\\\")
+        .replace(/\|/g, "\\|")
+        .replace(/\]/g, "\\]")
+        .trim();
+}
+function inlineReferenceLink(source, block, sameFile = false) {
+    const target = `${sameFile ? "" : source}#^${block.id}`;
+    return `[[${target}|${inlineReferenceAlias(block.preview || block.id)}]]`;
+}
 function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -470,9 +486,16 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         });
         this.addCommand({
             id: "copy-as-reference",
-            name: this.t("copyCurrentReference"),
+            name: this.t("copySentenceReference"),
             editorCallback: async (editor, view) => {
                 await this.copyCurrentParagraphReference(editor, view);
+            },
+        });
+        this.addCommand({
+            id: "copy-whole-paragraph-as-reference",
+            name: this.t("copyParagraphReference"),
+            editorCallback: async (editor, view) => {
+                await this.copyCurrentParagraphReference(editor, view, "paragraph");
             },
         });
         this.addCommand({
@@ -492,13 +515,22 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         this.registerDomEvent(document, "contextmenu", (event) => {
             this.contextReferenceTarget = this.referenceTargetFromDom(event.target);
         });
+        // Obsidian treats adjacent non-empty lines as one Markdown paragraph.
+        // An ID on the middle line may not be registered as a native block,
+        // so resolve plugin-made inline links to their exact marker line.
+        this.registerDomEvent(document, "click", (event) => this.handleInlineReferenceClick(event), true);
         this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
             const contextReference = this.contextReferenceTarget || this.referenceTargetAtCursor(editor);
             this.contextReferenceTarget = null;
             menu.addItem((item) => {
-                item.setTitle(this.t("copyCurrentReference"));
+                item.setTitle(this.t("copySentenceReference"));
                 item.setIcon("copy");
                 item.onClick(() => void this.copyCurrentParagraphReference(editor, view));
+            });
+            menu.addItem((item) => {
+                item.setTitle(this.t("copyParagraphReference"));
+                item.setIcon("align-left");
+                item.onClick(() => void this.copyCurrentParagraphReference(editor, view, "paragraph"));
             });
             menu.addItem((item) => {
                 item.setTitle(this.t("insertReference"));
@@ -915,8 +947,111 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         this.settings.pendingReference = null;
         await this.saveSettings();
     }
+    collectLineReferences(editor, requireSelection = false) {
+        const selection = editor.getSelection();
+        const hasSelection = selection.trim().length > 0;
+        if (!hasSelection && requireSelection)
+            return [];
+        const from = hasSelection ? editor.getCursor("from") : editor.getCursor();
+        const to = hasSelection ? editor.getCursor("to") : editor.getCursor();
+        let endLine = to.line;
+        // A selection ending at the beginning of the next line must not add
+        // a marker to that unselected next line.
+        if (hasSelection && to.ch === 0 && endLine > from.line)
+            endLine -= 1;
+        const usedIds = new Set();
+        for (const match of editor.getValue().matchAll(/\^([A-Za-z0-9-]+)/g)) {
+            if (match[1])
+                usedIds.add(match[1]);
+        }
+        const references = [];
+        const insertions = [];
+        for (let line = from.line; line <= endLine; line += 1) {
+            const full = editor.getLine(line);
+            if (!full.trim())
+                continue;
+            const startCh = hasSelection && line === from.line ? from.ch : 0;
+            const endCh = hasSelection && line === to.line ? to.ch : full.length;
+            let preview = hasSelection
+                ? full.slice(startCh, endCh).trim()
+                : full.trim();
+            preview = preview.replace(/(?:^|\s)\^[A-Za-z0-9-]+\s*$/, "").trim();
+            if (!preview)
+                continue;
+            let id = extractBlockId(full);
+            if (!id) {
+                id = createReferenceId(usedIds);
+                insertions.push({ line, ch: full.length, text: ` ^${id}` });
+            }
+            references.push({ id, preview });
+        }
+        // Insert bottom-up so the original selection/line positions remain valid.
+        insertions.sort((a, b) => b.line - a.line).forEach((item) => {
+            editor.replaceRange(item.text, { line: item.line, ch: item.ch });
+        });
+        return references;
+    }
+    collectParagraphReferences(editor) {
+        // A Markdown paragraph is a run of non-empty lines. Expand the
+        // selected lines to complete paragraphs without adding blank lines.
+        const selection = editor.getSelection();
+        const hasSelection = selection.trim().length > 0;
+        const from = hasSelection ? editor.getCursor("from") : editor.getCursor();
+        const to = hasSelection ? editor.getCursor("to") : editor.getCursor();
+        let endLine = to.line;
+        if (hasSelection && to.ch === 0 && endLine > from.line)
+            endLine -= 1;
+        const lineCount = editor.lastLine() + 1;
+        const groups = [];
+        const visited = new Set();
+        for (let line = from.line; line <= endLine; line += 1) {
+            if (!editor.getLine(line).trim())
+                continue;
+            let start = line;
+            let end = line;
+            while (start > 0 && editor.getLine(start - 1).trim())
+                start -= 1;
+            while (end + 1 < lineCount && editor.getLine(end + 1).trim())
+                end += 1;
+            const key = `${start}:${end}`;
+            if (!visited.has(key)) {
+                visited.add(key);
+                groups.push({ start, end });
+            }
+            line = end;
+        }
+        const usedIds = new Set();
+        for (const match of editor.getValue().matchAll(/\^([A-Za-z0-9-]+)/g)) {
+            if (match[1])
+                usedIds.add(match[1]);
+        }
+        const blocks = [];
+        const insertions = [];
+        for (const group of groups) {
+            const text = [];
+            for (let line = group.start; line <= group.end; line += 1) {
+                text.push(editor.getLine(line).replace(/(?:^|\s)\^[A-Za-z0-9-]+\s*$/, "").trim());
+            }
+            const preview = text.join(" ").replace(/\s+/g, " ").trim();
+            if (!preview)
+                continue;
+            const last = editor.getLine(group.end);
+            let id = extractBlockId(last);
+            if (!id) {
+                id = createReferenceId(usedIds);
+                insertions.push({ line: group.end, ch: last.length, text: ` ^${id}` });
+            }
+            blocks.push({ id, preview });
+        }
+        // All markers belong at the END of their paragraphs, not after
+        // the selected sentence. Never insert an empty line.
+        insertions.sort((a, b) => b.line - a.line).forEach((item) => {
+            editor.replaceRange(item.text, { line: item.line, ch: item.ch });
+        });
+        return blocks;
+    }
     async captureSelection(editor, suppliedView) {
-        if (editor.getSelection().trim().length === 0) {
+        if (!editor.getSelection().trim()) {
             new obsidian_1.Notice(this.t("noSelection"));
             return false;
         }
@@ -926,80 +1061,26 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
             new obsidian_1.Notice(this.t("noActiveNote"));
             return false;
         }
-        const from = editor.getCursor("from");
-        const to = editor.getCursor("to");
-        let startLine = from.line;
-        let endLine = to.line;
-        if (to.ch === 0 && endLine > startLine)
-            endLine -= 1;
-        while (startLine > 0 && editor.getLine(startLine - 1).trim().length > 0) {
-            startLine -= 1;
-        }
-        while (endLine < editor.lastLine() && editor.getLine(endLine + 1).trim().length > 0) {
-            endLine += 1;
-        }
-        const blocks = [];
-        let line = startLine;
-        while (line <= endLine) {
-            while (line <= endLine && editor.getLine(line).trim().length === 0)
-                line += 1;
-            if (line > endLine)
-                break;
-            const blockStart = line;
-            while (line <= endLine && editor.getLine(line).trim().length > 0)
-                line += 1;
-            blocks.push({ startLine: blockStart, endLine: line - 1 });
-        }
-        if (blocks.length === 0) {
+        const blocks = this.collectLineReferences(editor, true);
+        if (!blocks.length) {
             new obsidian_1.Notice(this.t("noSelection"));
             return false;
         }
-        const usedIds = new Set();
-        for (const match of editor.getValue().matchAll(/\^([A-Za-z0-9-]+)/g)) {
-            if (match[1])
-                usedIds.add(match[1]);
-        }
-        const pendingBlocks = [];
-        const insertions = [];
-        for (const block of blocks) {
-            const lines = [];
-            for (let index = block.startLine; index <= block.endLine; index += 1) {
-                lines.push(editor.getLine(index));
-            }
-            const lastLine = editor.getLine(block.endLine);
-            let id = extractBlockId(lastLine);
-            if (!id) {
-                id = createReferenceId(usedIds);
-                insertions.push({
-                    line: block.endLine,
-                    ch: lastLine.length,
-                    text: ` ^${id}`,
-                });
-            }
-            pendingBlocks.push({
-                id,
-                preview: makeBlockPreview(lines),
-            });
-        }
-        insertions
-            .sort((left, right) => right.line - left.line)
-            .forEach((insertion) => {
-            editor.replaceRange(insertion.text, { line: insertion.line, ch: insertion.ch });
-        });
         this.settings.pendingReference = {
             sourcePath: file.path,
             sourceName: file.basename,
-            blocks: pendingBlocks,
+            blocks,
             createdAt: Date.now(),
         };
         await this.saveSettings();
-        new obsidian_1.Notice(this.referenceCapturedText(pendingBlocks.length));
+        new obsidian_1.Notice(this.referenceCapturedText(blocks.length));
         return true;
     }
     parseReferenceTarget(rawValue) {
         if (typeof rawValue !== "string")
             return null;
         let value = rawValue.trim();
+        const inline = value.startsWith("[[") && !value.startsWith("![[");
         if (value.startsWith("![["))
             value = value.slice(3);
         else if (value.startsWith("[["))
@@ -1007,6 +1088,9 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         if (value.endsWith("]]"))
             value = value.slice(0, -2);
         const aliasIndex = value.indexOf("|");
+        const alias = aliasIndex !== -1
+            ? value.slice(aliasIndex + 1).replace(/\\([\\|\]])/g, "$1").trim()
+            : "";
         if (aliasIndex !== -1)
             value = value.slice(0, aliasIndex);
         try {
@@ -1022,7 +1106,7 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         const blockId = value.slice(markerIndex + 2).trim();
         if (!/^[A-Za-z0-9-]+$/.test(blockId))
             return null;
-        return { sourcePath, blockId };
+        return { sourcePath, blockId, inline, alias };
     }
     referenceTargetAtCursor(editor) {
         const cursor = editor.getCursor();
@@ -1068,6 +1152,34 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         }
         return null;
     }
+    handleInlineReferenceClick(event) {
+        if (event.defaultPrevented || event.button !== 0 || event.altKey || event.shiftKey)
+            return;
+        if (!(event.target instanceof Element))
+            return;
+        const element = event.target.closest("a.internal-link, .cm-hmd-internal-link");
+        if (!element || element.closest(".internal-embed"))
+            return;
+        const isEditorLink = !element.matches("a.internal-link");
+        // In the editor a plain click positions the caret, rather than opens a link.
+        if (isEditorLink && !event.ctrlKey && !event.metaKey)
+            return;
+        const view = this.getActiveMarkdownView();
+        if (!(view === null || view === void 0 ? void 0 : view.file))
+            return;
+        const target = this.referenceTargetFromDom(element)
+            || (isEditorLink && view.editor ? this.referenceTargetAtCursor(view.editor) : null);
+        // Only intercept the short block IDs generated by Replace Memory.
+        if (!target || !/^[a-z]{5}$/.test(target.blockId))
+            return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        // The rendered link contains its display text even when its href
+        // omits the alias. This distinguishes whole-paragraph references
+        // from single-sentence links during source navigation.
+        const alias = String(element.textContent || "").trim() || target.alias;
+        void this.locateReferenceSource(view.editor, view, { ...target, alias, inline: true });
+    }
     async locateReferenceSource(editor, suppliedView, suppliedTarget) {
         const view = suppliedView !== null && suppliedView !== void 0 ? suppliedView : this.getActiveMarkdownView();
         const currentFile = view === null || view === void 0 ? void 0 : view.file;
@@ -1088,7 +1200,12 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
                 return false;
             }
         }
-        const content = await this.app.vault.cachedRead(sourceFile);
+        // Use the live editor buffer for the active note: the source marker
+        // may have been inserted only moments ago and not saved to disk yet.
+        const openView = this.getActiveMarkdownView();
+        const content = openView && openView.file && openView.file.path === sourceFile.path && openView.editor
+            ? openView.editor.getValue()
+            : await this.app.vault.cachedRead(sourceFile);
         const lines = content.split(/\r?\n/);
         const blockPattern = new RegExp(`(?:^|\\s)\\^${escapeRegExp(target.blockId)}\\s*$`);
         const blockLine = lines.findIndex((line) => blockPattern.test(line));
@@ -1097,8 +1214,25 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
             return false;
         }
         let startLine = blockLine;
-        while (startLine > 0 && lines[startLine - 1].trim().length > 0) {
-            startLine -= 1;
+        const isInlineMarker = target.inline || (blockLine < lines.length - 1 && lines[blockLine + 1].trim().length > 0);
+        if (!isInlineMarker) {
+            // Preserve the old whole-paragraph selection for legacy embeds.
+            while (startLine > 0 && lines[startLine - 1].trim().length > 0)
+                startLine -= 1;
+        }
+        else if (target.alias && target.inline) {
+            // For whole-paragraph links, use the actual displayed text to
+            // identify the intended span. Single-sentence links continue to
+            // select only the marker line, as in v0.1.14.
+            let paraStart = blockLine;
+            while (paraStart > 0 && lines[paraStart - 1].trim())
+                paraStart -= 1;
+            const paragraphText = lines.slice(paraStart, blockLine + 1)
+                .map((line) => line.replace(/(?:^|\s)\^[A-Za-z0-9-]+\s*$/, "").trim())
+                .join(" ").replace(/\s+/g, " ").trim();
+            const aliasText = String(target.alias).replace(/\s+/g, " ").trim();
+            if (paraStart < blockLine && paragraphText === aliasText)
+                startLine = paraStart;
         }
         let targetView = this.getActiveMarkdownView();
         if (!(targetView === null || targetView === void 0 ? void 0 : targetView.file) || targetView.file.path !== sourceFile.path) {
@@ -1107,6 +1241,11 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
             targetView = leaf.view instanceof obsidian_1.MarkdownView
                 ? leaf.view
                 : this.getActiveMarkdownView();
+        }
+        // Precise line selection needs a visible source editor, not Preview.
+        if (targetView && typeof targetView.getMode === "function" && targetView.getMode() === "preview"
+            && typeof targetView.setMode === "function") {
+            await targetView.setMode("source");
         }
         const targetEditor = targetView === null || targetView === void 0 ? void 0 : targetView.editor;
         if (!targetEditor) {
@@ -1124,102 +1263,30 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         new obsidian_1.Notice(this.t("referenceLocated"));
         return true;
     }
-    async copyCurrentParagraphReference(editor, suppliedView) {
+    async copyCurrentParagraphReference(editor, suppliedView, mode = "sentence") {
         const view = suppliedView !== null && suppliedView !== void 0 ? suppliedView : this.getActiveMarkdownView();
         const file = view === null || view === void 0 ? void 0 : view.file;
         if (!file) {
             new obsidian_1.Notice(this.t("noActiveNote"));
             return false;
         }
-        const selection = editor.getSelection();
-        let startLine;
-        let endLine;
-        if (selection.trim().length > 0) {
-            const from = editor.getCursor("from");
-            const to = editor.getCursor("to");
-            startLine = from.line;
-            endLine = to.line;
-            if (to.ch === 0 && endLine > startLine)
-                endLine -= 1;
-            while (startLine > 0 && editor.getLine(startLine - 1).trim().length > 0) {
-                startLine -= 1;
-            }
-            while (endLine < editor.lastLine() && editor.getLine(endLine + 1).trim().length > 0) {
-                endLine += 1;
-            }
-        }
-        else {
-            const cursor = editor.getCursor();
-            if (editor.getLine(cursor.line).trim().length === 0) {
-                new obsidian_1.Notice(this.t("noParagraphAtCursor"));
-                return false;
-            }
-            startLine = cursor.line;
-            endLine = cursor.line;
-            while (startLine > 0 && editor.getLine(startLine - 1).trim().length > 0) {
-                startLine -= 1;
-            }
-            while (endLine < editor.lastLine() && editor.getLine(endLine + 1).trim().length > 0) {
-                endLine += 1;
-            }
-        }
-        const blocks = [];
-        let line = startLine;
-        while (line <= endLine) {
-            while (line <= endLine && editor.getLine(line).trim().length === 0)
-                line += 1;
-            if (line > endLine)
-                break;
-            const blockStart = line;
-            while (line <= endLine && editor.getLine(line).trim().length > 0)
-                line += 1;
-            blocks.push({ startLine: blockStart, endLine: line - 1 });
-        }
-        if (blocks.length === 0) {
+        const blocks = mode === "paragraph"
+            ? this.collectParagraphReferences(editor)
+            : this.collectLineReferences(editor);
+        if (!blocks.length) {
             new obsidian_1.Notice(this.t("noParagraphAtCursor"));
             return false;
         }
-        const usedIds = new Set();
-        for (const match of editor.getValue().matchAll(/\^([A-Za-z0-9-]+)/g)) {
-            if (match[1])
-                usedIds.add(match[1]);
-        }
-        const copiedBlocks = [];
-        const insertions = [];
-        for (const block of blocks) {
-            const lines = [];
-            for (let index = block.startLine; index <= block.endLine; index += 1) {
-                lines.push(editor.getLine(index));
-            }
-            const lastLine = editor.getLine(block.endLine);
-            let id = extractBlockId(lastLine);
-            if (!id) {
-                id = createReferenceId(usedIds);
-                insertions.push({
-                    line: block.endLine,
-                    ch: lastLine.length,
-                    text: ` ^${id}`,
-                });
-            }
-            copiedBlocks.push({
-                id,
-                preview: makeBlockPreview(lines),
-            });
-        }
-        insertions
-            .sort((left, right) => right.line - left.line)
-            .forEach((insertion) => {
-            editor.replaceRange(insertion.text, { line: insertion.line, ch: insertion.ch });
-        });
         this.settings.pendingReference = {
             sourcePath: file.path,
             sourceName: file.basename,
-            blocks: copiedBlocks,
+            blocks,
             createdAt: Date.now(),
         };
         await this.saveSettings();
         const source = markdownLinkPath(file.path);
-        const snippet = copiedBlocks.map((block) => `![[${source}#^${block.id}]]`).join("\n\n");
+        // Plain wikilinks with selected text as the alias: no embeds/blank lines.
+        const snippet = blocks.map((block) => inlineReferenceLink(source, block)).join("\n");
         let copiedToSystemClipboard = false;
         try {
             const textarea = document.createElement("textarea");
@@ -1250,7 +1317,7 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
             new obsidian_1.Notice(this.t("copyReferenceFailed"));
             return true;
         }
-        new obsidian_1.Notice(this.referenceCopiedText(copiedBlocks.length));
+        new obsidian_1.Notice(this.referenceCopiedText(blocks.length));
         return true;
     }
     async insertPendingReference(editor, suppliedView) {
@@ -1267,26 +1334,14 @@ class ReplaceMemoryPlugin extends obsidian_1.Plugin {
         }
         const sameFile = view.file.path === pending.sourcePath;
         const source = markdownLinkPath(pending.sourcePath);
-        const embeds = pending.blocks
-            .map((block) => sameFile
-            ? `![[#^${block.id}]]`
-            : `![[${source}#^${block.id}]]`)
-            .join("\n\n");
+        const links = pending.blocks.map((block) => inlineReferenceLink(source, block, sameFile)).join("\n");
+        // Keep the cursor's current line intact. Do not inject blank lines.
         const cursor = targetEditor.getCursor();
-        const currentLine = targetEditor.getLine(cursor.line);
-        const before = currentLine.slice(0, cursor.ch);
-        const after = currentLine.slice(cursor.ch);
-        const prefix = before.trim().length > 0 ? "\n\n" : "";
-        const suffix = after.trim().length > 0 ? "\n\n" : "";
-        const insertion = `${prefix}${embeds}${suffix}`;
-        targetEditor.replaceRange(insertion, cursor);
-        const insertionLines = insertion.split("\n");
+        targetEditor.replaceRange(links, cursor);
+        const insertionLines = links.split("\n");
         const endPosition = insertionLines.length === 1
             ? { line: cursor.line, ch: cursor.ch + insertionLines[0].length }
-            : {
-                line: cursor.line + insertionLines.length - 1,
-                ch: insertionLines[insertionLines.length - 1].length,
-            };
+            : { line: cursor.line + insertionLines.length - 1, ch: insertionLines[insertionLines.length - 1].length };
         targetEditor.setCursor(endPosition);
         new obsidian_1.Notice(this.referenceInsertedText(pending.blocks.length));
         return true;
